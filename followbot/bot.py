@@ -426,8 +426,10 @@ class BotApp:
         prompt = (
             f"{head}.\n\n"
             "Send one handle or a list: <code>@name</code>, <code>name</code>, or profile links, "
-            "separated by spaces, commas, or new lines. You can also send a .txt/.csv file. "
-            f"Up to {MAX_HANDLES_PER_JOB} per job."
+            "separated by spaces, commas, or new lines. "
+            f"Up to {MAX_HANDLES_PER_JOB} per job.\n\n"
+            "Long list? Telegram may hold a message with lots of links. Send the names without links, "
+            "a .txt/.csv file, or several messages (they add up)."
         )
         markup = _kb([[_cancel()]])
         await (message.edit_text(prompt, reply_markup=markup) if edit else message.answer(prompt, reply_markup=markup))
