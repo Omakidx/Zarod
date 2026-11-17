@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import json
+import logging
 import re
 
 import httpx
@@ -16,6 +17,8 @@ from .base import (
     SessionExpired,
     TransientError,
 )
+
+log = logging.getLogger(__name__)
 
 # The app id instagram.com's web client sends on every API call (public, same for everyone).
 WEB_APP_ID = "936619743392459"
@@ -219,6 +222,8 @@ class InstagramAdapter:
                 if found not in own:
                     return found, "ok"
         not_found = '"error":true' in text or "PolarisErrorRoot" in text or "httpErrorPage" in text
+        # What the resolver said, with long numbers masked, so a puzzling refusal can be read from the log.
+        log.info("route lookup for %s: %s", handle, re.sub(r"\d{4,}", "#", text)[:400])
         # Instagram's own short error text (no account data in it), so a report says what it refused.
         summary = re.search(r'"(?:errorSummary|errorDescription|message)":"([^"]{1,80})"', text)
         said = f' "{summary.group(1)}"' if summary else ""
@@ -228,7 +233,9 @@ class InstagramAdapter:
         user_id, note = await self._id_from_route(handle)
         if user_id is None:
             if "error route" in note:
-                return FollowResult(Outcome.NOT_FOUND, action_sent=False, detail=f"profile unavailable ({note})")
+                # Also what Instagram answers for a profile that exists but is hidden from this account.
+                return FollowResult(Outcome.NOT_FOUND, action_sent=False,
+                                    detail=f"Instagram shows it as unavailable to this account ({note})")
             raise TransientError(f"Couldn't look up @{handle} on Instagram ({note})")
         # No following/requested flags on this path; the mutation's answer says which it was.
         return await self._follow_mutation(handle, user_id)

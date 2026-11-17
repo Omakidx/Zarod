@@ -249,7 +249,7 @@ class TestInstagram:
                                 if req.url.path == "/ajax/bulk-route-definitions/" else base(req))
 
         r = await ig_adapter(site('for (;;);{"payload":{"payloads":{"/bob/":{"error":true}}}}')).follow("bob")
-        assert r.outcome == Outcome.NOT_FOUND and "unavailable" in r.detail
+        assert r.outcome == Outcome.NOT_FOUND and "unavailable to this account" in r.detail
         said = '{"payload":{"payloads":{"/bob/":{"error":true,"errorSummary":"Page not found"}}}}'
         r = await ig_adapter(site(said)).follow("bob")
         assert '"Page not found"' in r.detail

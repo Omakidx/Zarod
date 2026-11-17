@@ -64,7 +64,11 @@ class CurlTransport(httpx.AsyncBaseTransport):
             # Only the type: curl's message can quote the request.
             if self._proxy and "proxy" in str(exc).lower():
                 raise httpx.ProxyError("proxy error") from None
-            raise httpx.ConnectError(f"curl error ({type(exc).__name__})") from None
+            # curl's numeric error code and the path are safe to show and say what went wrong.
+            code = getattr(exc, "code", None)
+            raise httpx.ConnectError(
+                f"curl error {int(code) if code is not None else type(exc).__name__} on {request.url.path}"
+            ) from None
         finally:
             # httpx owns the cookie jar; don't let curl keep a second copy.
             self._session.cookies.clear()
