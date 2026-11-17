@@ -1,0 +1,12 @@
+#!/usr/bin/env bash
+# `docker compose` with secrets from .env.local, running the bot as your own user.
+# Usage: ./dc up -d --build | ./dc logs -f bot | ./dc down | ./dc run --rm -T bot ...
+set -euo pipefail
+cd "$(dirname "$0")"
+if [[ ! -f .env.local ]]; then
+  echo ".env.local not found. Create it with: cp .env.example .env.local && chmod 600 .env.local" >&2
+  exit 1
+fi
+mkdir -p data
+export HOST_UID="$(id -u)" HOST_GID="$(id -g)"
+exec docker compose --env-file .env.local "$@"

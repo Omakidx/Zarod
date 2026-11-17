@@ -1,0 +1,5 @@
+aiogram==3.32.0
+aiosqlite==0.22.1
+cryptography==50.0.2
+httpx==0.28.1
+curl_cffi==0.16.3

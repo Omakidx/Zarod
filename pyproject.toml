@@ -1,0 +1,10 @@
+[project]
+name = "followbot"
+version = "0.1.0"
+description = "Personal Telegram bot that follows X and Instagram accounts using your own session cookies."
+requires-python = ">=3.12"
+
+[tool.pytest.ini_options]
+asyncio_mode = "auto"
+asyncio_default_fixture_loop_scope = "function"
+testpaths = ["tests"]

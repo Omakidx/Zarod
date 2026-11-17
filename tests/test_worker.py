@@ -1,0 +1,171 @@
+import base64
+
+import pytest
+
+from followbot.config import Limits, Settings
+from followbot.crypto import CookieVault, generate_key
+from followbot.db import Database
+from followbot.platforms import FollowResult, Outcome, RateLimited, SessionExpired, TransientError
+from followbot.worker import Worker
+
+
+class Clock:
+    def __init__(self, t=1_000_000.0):
+        self.t = t
+
+    def __call__(self):
+        return self.t
+
+
+class FakeAdapter:
+    platform = "x"
+
+    def __init__(self, script):
+        self.script = script  # handle -> FollowResult | Exception
+        self.calls = []
+        self.cookies = {"auth_token": "A", "ct0": "C"}
+
+    async def follow(self, handle):
+        self.calls.append(handle)
+        r = self.script.get(handle, FollowResult(Outcome.FOLLOWED, True))
+        if isinstance(r, Exception):
+            raise r
+        return r
+
+    def export_cookies(self):
+        return self.cookies
+
+    async def aclose(self):
+        pass
+
+
+class Notes:
+    def __init__(self):
+        self.alerts, self.progress, self.finished = [], [], []
+
+    async def job_progress(self, job_id):
+        self.progress.append(job_id)
+
+    async def job_finished(self, job_id):
+        self.finished.append(job_id)
+
+    async def alert(self, text):
+        self.alerts.append(text)
+
+
+@pytest.fixture
+async def env(tmp_path):
+    db = await Database.open(str(tmp_path / "t.db"))
+    vault = CookieVault(base64.urlsafe_b64decode(generate_key()))
+    settings = Settings(
+        bot_token="t", owner_id=1, encryption_key=b"0" * 32, db_path="", proxies={"us": "http://vpn:8888"},
+        require_proxy=True, user_agent="ua",
+        limits=Limits(window_limit=3, window_seconds=600, daily_limit={"x": 5, "instagram": 5}, gap_min=30, gap_max=30),
+    )
+    account_id = await db.upsert_account("x", "me", vault.encrypt("x:me", {"auth_token": "A", "ct0": "C"}), "ua", "us")
+    clock, notes = Clock(), Notes()
+    holder = {}
+
+    def factory(platform, cookies, ua, proxy):
+        assert proxy == "http://vpn:8888"
+        return holder["adapter"]
+
+    worker = Worker(db, vault, settings, notes, adapter_factory=factory, clock=clock)
+    yield db, worker, clock, notes, holder, account_id
+    await db.close()
+
+
+async def drain(worker, clock, steps=50):
+    for _ in range(steps):
+        delay = await worker.tick()
+        if not await worker.db.accounts_with_pending():
+            return
+        clock.t += delay
+
+
+async def test_bulk_job_respects_window_and_gaps(env):
+    db, worker, clock, notes, holder, acc = env
+    holder["adapter"] = FakeAdapter({"b": FollowResult(Outcome.ALREADY, False)})
+    job = await db.create_job(acc, 99, ["a", "b", "c", "d", "e"])
+    start = clock.t
+    await drain(worker, clock)
+    assert holder["adapter"].calls == ["a", "b", "c", "d", "e"]
+    assert await db.job_counts(job) == {"followed": 4, "already": 1}
+    assert notes.finished == [job]
+    times = await db.action_times(acc, 0)
+    assert len(times) == 4
+    # 3 per 600 s: the 4th real follow can't happen before the 1st + 600 s.
+    assert times[3] >= times[0] + 600
+    assert all(b - a >= 30 for a, b in zip(times, times[1:]))
+    assert times[0] == start
+
+
+async def test_daily_cap_stops_after_limit(env):
+    db, worker, clock, notes, holder, acc = env
+    holder["adapter"] = FakeAdapter({})
+    await db.create_job(acc, 99, [f"u{i}" for i in range(7)])
+    for _ in range(40):
+        clock.t += await worker.tick()
+        if len(holder["adapter"].calls) >= 5 and clock.t < 1_000_000 + 86_400 - 1000:
+            break
+    assert len(holder["adapter"].calls) == 5
+    account = await db.get_account(acc)
+    assert await worker.ready_at(account) >= 1_000_000 + 86_400
+
+
+async def test_rate_limited_pauses_and_retries_same_task(env):
+    db, worker, clock, notes, holder, acc = env
+    holder["adapter"] = FakeAdapter({"a": RateLimited("slow down", retry_after=3600)})
+    job = await db.create_job(acc, 99, ["a"])
+    await worker.tick()
+    assert "Resuming automatically" in notes.alerts[0]
+    assert (await db.job_counts(job)) == {"pending": 1}
+    assert await worker.ready_at(await db.get_account(acc)) == clock.t + 3600
+    holder["adapter"].script = {}
+    clock.t += 3600
+    await worker.tick()
+    assert (await db.job_counts(job)) == {"followed": 1}
+
+
+async def test_session_expired_holds_queue(env):
+    db, worker, clock, notes, holder, acc = env
+    holder["adapter"] = FakeAdapter({"a": SessionExpired("logged out")})
+    job = await db.create_job(acc, 99, ["a", "b"])
+    await worker.tick()
+    account = await db.get_account(acc)
+    assert account.status == "expired"
+    assert await worker.ready_at(account) == float("inf")
+    assert (await db.job_counts(job)) == {"pending": 2}
+    assert "Add account" in notes.alerts[0]
+
+
+async def test_transient_retries_then_fails(env):
+    db, worker, clock, notes, holder, acc = env
+    holder["adapter"] = FakeAdapter({"a": TransientError("VPN proxy unreachable")})
+    job = await db.create_job(acc, 99, ["a", "b"])
+    await drain(worker, clock)
+    assert holder["adapter"].calls == ["a", "a", "a", "b"]
+    assert (await db.job_counts(job)) == {"failed": 1, "followed": 1}
+
+
+async def test_rotated_cookies_are_persisted_encrypted(env):
+    db, worker, clock, notes, holder, acc = env
+    adapter = FakeAdapter({})
+    adapter.cookies = {"auth_token": "A", "ct0": "ROTATED"}
+    holder["adapter"] = adapter
+    await db.create_job(acc, 99, ["a"])
+    await worker.tick()
+    account = await db.get_account(acc)
+    assert "ROTATED" not in account.cookies_enc
+    assert worker.vault.decrypt("x:me", account.cookies_enc)["ct0"] == "ROTATED"
+
+
+async def test_missing_proxy_blocks_account(env):
+    db, worker, clock, notes, holder, acc = env
+    await db.conn.execute("UPDATE accounts SET proxy_name = 'gone' WHERE id = ?", (acc,))
+    await db.conn.commit()
+    holder["adapter"] = FakeAdapter({})
+    await db.create_job(acc, 99, ["a"])
+    await worker.tick()
+    assert (await db.get_account(acc)).status == "blocked"
+    assert holder["adapter"].calls == []

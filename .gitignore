@@ -1,0 +1,13 @@
+.env
+.env.local
+data/
+__pycache__/
+*.pyc
+.pytest_cache/
+*.cookies.json
+secrets/
+
+# Local AI-assistant tooling (not part of the bot)
+.claude/
+.codex/
+.agents/

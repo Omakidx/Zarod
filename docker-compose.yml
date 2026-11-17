@@ -1,0 +1,44 @@
+# Run through ./dc (not plain `docker compose`): it loads secrets from .env.local
+# and runs the bot as your own user so ./data needs no sudo.
+#
+# The gluetun container connects to ONE pinned Surfshark server. Only the bot's
+# X/Instagram traffic goes through it (via its HTTP proxy); Telegram uses your normal connection.
+
+services:
+  vpn:
+    image: qmcgaw/gluetun:v3.40.0
+    cap_add: [NET_ADMIN]
+    devices: ["/dev/net/tun:/dev/net/tun"]
+    restart: unless-stopped
+    # No ports are published: the proxy is reachable only by the bot on the compose network.
+    environment:
+      VPN_SERVICE_PROVIDER: surfshark
+      VPN_TYPE: wireguard
+      WIREGUARD_PRIVATE_KEY: ${SURFSHARK_WG_PRIVATE_KEY:?set SURFSHARK_WG_PRIVATE_KEY in .env.local (and run via ./dc)}
+      WIREGUARD_ADDRESSES: 10.14.0.2/16
+      # Pin one server so the exit IP stays the same. List them with:
+      #   docker run --rm qmcgaw/gluetun:v3.40.0 format-servers -surfshark
+      SERVER_HOSTNAMES: ${VPN_HOSTNAME:?set VPN_HOSTNAME in .env.local}
+      HTTPPROXY: "on"
+      HTTPPROXY_LISTENING_ADDRESS: ":8888"
+      HTTPPROXY_STEALTH: "on"
+
+  bot:
+    build: .
+    env_file: .env.local
+    environment:
+      PROXIES: main=http://vpn:8888
+      REQUIRE_PROXY: "true"
+      DB_PATH: /data/followbot.db
+    user: "${HOST_UID:-10001}:${HOST_GID:-10001}"
+    volumes:
+      - ./data:/data
+      - ./secrets:/secrets:ro   # cookie exports named in X_COOKIES_FILE / INSTAGRAM_COOKIES_FILE
+    read_only: true
+    tmpfs: [/tmp]
+    cap_drop: [ALL]
+    security_opt: ["no-new-privileges:true"]
+    depends_on:
+      vpn:
+        condition: service_healthy
+    restart: unless-stopped
