@@ -440,11 +440,15 @@ class BotApp:
             text = (await self.bot.download(message.document)).read().decode("utf-8", errors="replace")
         else:
             text = message.text or ""
-        platform = (await state.get_data()).get("platform")
+        data = await state.get_data()
+        platform = data.get("platform")
         if platform is None:
             await state.clear()
             await message.answer("That step expired. Tap <b>Follow accounts</b> again.")
             return
+        if await state.get_state() == FollowFlow.confirm.state and data.get("handles"):
+            # Telegram splits a long list into several messages: each one adds to the open preview.
+            text = "\n".join(data["handles"]) + "\n" + text
         await self._preview(message, state, platform, text)
 
     async def _preview(self, message: Message, state: FSMContext, platform: str, text: str) -> None:
@@ -503,6 +507,7 @@ class BotApp:
             names = ", ".join(f"@{html.escape(a.username)}" for a in held)
             lines.append(f"⏸ {names} {'is' if len(held) == 1 else 'are'} paused: "
                          "these wait until you tap <b>Resume all</b>.")
+        lines.append("Sending more handles now adds them to this list.")
         if over_cap:
             lines.append("⚠️ Goes past today's cap for " + ", ".join(over_cap) + ". The rest waits for the cap to free up.")
 

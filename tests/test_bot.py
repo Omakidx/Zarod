@@ -184,6 +184,16 @@ async def test_finished_report_is_a_summary_with_grouped_problems(env):
     assert "error route" not in report
 
 
+async def test_a_list_split_over_two_messages_is_one_preview(env):
+    db, worker, *_ = env
+    app, state, msg = make_app(db, worker), fsm(), fake_message()
+    first = " ".join(f"https://x.com/user{i}" for i in range(97))
+    await app.cmd_follow(msg, state, CommandObject(prefix="/", command="follow", args=first))
+    await app.on_handles(fake_message("https://x.com/user96 https://x.com/user97 https://x.com/user98"), state)
+    assert len((await state.get_data())["handles"]) == 99
+    assert await state.get_state() == FollowFlow.confirm.state
+
+
 async def test_worker_runs_accounts_at_the_same_time(tmp_path):
     import asyncio
 
