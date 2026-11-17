@@ -130,6 +130,41 @@ async def test_paused_account_is_shown_on_preview_and_card_until_resumed(env):
     assert "@me: 0/1 · starting…" in card
 
 
+async def test_resending_a_queued_list_does_not_queue_it_twice(env):
+    db, worker, _, _, _, acc = env
+    app, state, msg = make_app(db, worker), fsm(), fake_message()
+    app._reported = set()
+    await db.create_job(acc, 1, ["alice", "bob"])
+
+    await app.cmd_follow(msg, state, CommandObject(prefix="/", command="follow", args="@alice @bob"))
+    assert "All 2 are already queued" in msg.answer.await_args.args[0]
+    assert await state.get_state() is None
+
+    await app.cmd_follow(msg, state, CommandObject(prefix="/", command="follow", args="@Alice @bob @carol"))
+    text = msg.answer.await_args.args[0]
+    assert "<b>1</b> to follow" in text and "2 already queued, skipped" in text
+    query = SimpleNamespace(answer=AsyncMock(), message=SimpleNamespace(
+        chat=SimpleNamespace(id=1), message_id=77, edit_text=AsyncMock()))
+    await app.on_confirm(query, SimpleNamespace(value="yes"), state)
+    assert await db.pending_handles(acc) == {"alice", "bob", "carol"}
+    assert await db.pending_count(acc) == 3
+
+
+async def test_job_card_says_when_the_next_follow_is_due(env):
+    import time
+
+    db, worker, clock, _, _, acc = env
+    app = make_app(db, worker)
+    clock.t = time.time()
+    job = await db.create_job(acc, 1, ["alice"])
+    await db.set_job_message(job, 5)
+    await db.set_account_state(acc, next_action_at=clock.t + 45)
+    await app._render_job(job, final=False)
+    card = app.bot.edit_message_text.await_args.args[0]
+    assert "@me: 0/1 · next ~" + time.strftime("%H:%M", time.localtime(clock.t + 45)) in card
+    assert "one every 30–30 s per account" in card
+
+
 async def test_worker_runs_accounts_at_the_same_time(tmp_path):
     import asyncio
 

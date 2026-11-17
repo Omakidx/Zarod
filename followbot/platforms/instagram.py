@@ -219,7 +219,10 @@ class InstagramAdapter:
                 if found not in own:
                     return found, "ok"
         not_found = '"error":true' in text or "PolarisErrorRoot" in text or "httpErrorPage" in text
-        return None, f"{self._note(resp)}{' error route' if not_found else ''} {len(text)} chars"
+        # Instagram's own short error text (no account data in it), so a report says what it refused.
+        summary = re.search(r'"(?:errorSummary|errorDescription|message)":"([^"]{1,80})"', text)
+        said = f' "{summary.group(1)}"' if summary else ""
+        return None, f"{self._note(resp)}{' error route' if not_found else ''}{said} {len(text)} chars"
 
     async def _follow_via_route(self, handle: str) -> FollowResult:
         user_id, note = await self._id_from_route(handle)

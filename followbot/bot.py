@@ -170,13 +170,18 @@ class BotApp:
             if pending and account and account.status in HELD:
                 waiting = HELD[account.status]
                 parts.append(waiting)
+            elif pending and account and not final:
+                ready = await self.worker.ready_at(account)
+                if ready - time.time() > 5:
+                    parts.append("next ~" + time.strftime("%H:%M", time.localtime(ready)))
             rows.append(f"{name}: {n - pending}/{n} · " + (" · ".join(parts) or waiting))
         head = f"{'🏁' if final else '🔄'} <b>Job #{job.batch_id}</b>"
         if platform:
             head += f" · {PLATFORM_NAMES[platform]} · {len(jobs)} account{'s' if len(jobs) != 1 else ''}"
         text = head + "\n" + "\n".join(rows)
         if left:
-            text += f"\n⏳ {left} left"
+            gaps = self.settings.limits
+            text += f"\n⏳ {left} left · one every {gaps.gap_min:.0f}–{gaps.gap_max:.0f} s per account"
         try:
             await self.bot.edit_message_text(text, chat_id=job.chat_id, message_id=job.message_id)
         except TelegramBadRequest:
@@ -438,6 +443,15 @@ class BotApp:
             await message.answer("I couldn't find any valid handles in that. Try again.", reply_markup=_kb([[_cancel()]]))
             return
 
+        # A handle every account already has queued (say, the same list sent twice) is not queued again.
+        queued_sets = [await self.db.pending_handles(a.id) for a in accounts]
+        already = [h for h in parsed.handles if queued_sets and all(h.lower() in q for q in queued_sets)]
+        parsed.handles = [h for h in parsed.handles if h not in already]
+        if not parsed.handles:
+            await state.clear()
+            await message.answer(f"All {len(already)} are already queued. The job card shows their progress.")
+            return
+
         limits = self.settings.limits
         daily = limits.daily_limit[platform]
         # Accounts run side by side, so the slowest one (longest queue) sets the time.
@@ -460,6 +474,8 @@ class BotApp:
         lines.append(preview)
         if parsed.duplicates:
             lines.append(f"• {parsed.duplicates} duplicates removed")
+        if already:
+            lines.append(f"• {len(already)} already queued, skipped")
         if parsed.wrong_platform:
             lines.append(f"• {len(parsed.wrong_platform)} links for the other platform skipped")
         if parsed.invalid:
@@ -504,13 +520,20 @@ class BotApp:
         batch_id = None
         now = time.time()
         for i, account in enumerate(accounts):
-            job_id = await self.db.create_job(account.id, query.message.chat.id, data["handles"], batch_id)
+            queued = await self.db.pending_handles(account.id)
+            handles = [h for h in data["handles"] if h.lower() not in queued]
+            if not handles:
+                continue
+            job_id = await self.db.create_job(account.id, query.message.chat.id, handles, batch_id)
             batch_id = batch_id or job_id
             await self.db.set_job_message(job_id, query.message.message_id)
             if i:
                 # A few seconds apart, so several accounts don't hit the same profile in the same second.
                 start = now + STAGGER_SECONDS * i * random.uniform(0.6, 1.4)
                 await self.db.set_account_state(account.id, next_action_at=max(account.next_action_at, start))
+        if batch_id is None:
+            await query.message.edit_text("All of these are already queued.")
+            return
         await self._render_job(batch_id, final=False)
         self.worker.wake()
 

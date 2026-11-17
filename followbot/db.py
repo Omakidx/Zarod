@@ -317,6 +317,12 @@ class Database:
         await self.conn.commit()
         return len(job_ids)
 
+    async def pending_handles(self, account_id: int) -> set[str]:
+        cur = await self.conn.execute(
+            "SELECT handle FROM tasks WHERE account_id = ? AND status = 'pending'", (account_id,)
+        )
+        return {r["handle"].lower() for r in await cur.fetchall()}
+
     async def pending_count(self, account_id: int) -> int:
         cur = await self.conn.execute(
             "SELECT COUNT(*) AS n FROM tasks WHERE account_id = ? AND status = 'pending'", (account_id,)
