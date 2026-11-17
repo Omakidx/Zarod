@@ -47,6 +47,9 @@ STATUS_ICONS = [
     ("failed", "⚠️ failed"),
     ("cancelled", "✖️ cancelled"),
 ]
+# Why an account's queued follows aren't moving, shown on the job card.
+HELD = {"paused": "⏸ paused, tap Resume all", "blocked": "⛔ blocked, tap Resume all",
+        "expired": "🔑 needs new cookies (Add account)"}
 
 
 class ConnectFlow(StatesGroup):
@@ -163,7 +166,11 @@ class BotApp:
             parts = [f"{label} {counts[s]}" for s, label in STATUS_ICONS if counts.get(s)]
             name = f"@{html.escape(account.username)}" if account else "removed account"
             platform = platform or (account.platform if account else None)
-            rows.append(f"{name}: {n - pending}/{n} · " + (" · ".join(parts) or "starting…"))
+            waiting = "starting…"
+            if pending and account and account.status in HELD:
+                waiting = HELD[account.status]
+                parts.append(waiting)
+            rows.append(f"{name}: {n - pending}/{n} · " + (" · ".join(parts) or waiting))
         head = f"{'🏁' if final else '🔄'} <b>Job #{job.batch_id}</b>"
         if platform:
             head += f" · {PLATFORM_NAMES[platform]} · {len(jobs)} account{'s' if len(jobs) != 1 else ''}"
@@ -463,6 +470,11 @@ class BotApp:
         if longest:
             lines.append(f"• up to {longest} already queued ahead of these")
         lines.append(f"⏱ about {human_duration(eta)} (each account keeps its own limits)")
+        held = [a for a in accounts if a.status == "paused"]
+        if held:
+            names = ", ".join(f"@{html.escape(a.username)}" for a in held)
+            lines.append(f"⏸ {names} {'is' if len(held) == 1 else 'are'} paused: "
+                         "these wait until you tap <b>Resume all</b>.")
         if over_cap:
             lines.append("⚠️ Goes past today's cap for " + ", ".join(over_cap) + ". The rest waits for the cap to free up.")
 
@@ -609,6 +621,8 @@ class BotApp:
             elif account.status == "expired":
                 expired.append(_label(account))
         self.worker.wake()
+        for batch_id in await self.db.open_batches():
+            await self._render_job(batch_id, final=False)  # drop the "paused" note from live job cards
         text = f"▶️ Resumed {resumed} account(s)."
         if expired:
             text += "\nStill need fresh cookies (<b>Add account</b>): " + ", ".join(expired)

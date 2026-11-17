@@ -110,6 +110,26 @@ async def test_follow_uses_every_account_on_the_platform_in_one_batch(env):
     assert "X · 2 accounts" in text and "@me: 0/2" in text and "@two: 0/2" in text
 
 
+async def test_paused_account_is_shown_on_preview_and_card_until_resumed(env):
+    db, worker, _, _, _, acc = env
+    await db.set_account_state(acc, status="paused")
+    app, state, msg = make_app(db, worker), fsm(), fake_message()
+    app._reported = set()
+    await app.cmd_follow(msg, state, CommandObject(prefix="/", command="follow", args="@alice"))
+    assert "@me is paused" in msg.answer.await_args.args[0]
+
+    query = SimpleNamespace(answer=AsyncMock(), message=SimpleNamespace(
+        chat=SimpleNamespace(id=1), message_id=77, edit_text=AsyncMock()))
+    await app.on_confirm(query, SimpleNamespace(value="yes"), state)
+    card = app.bot.edit_message_text.await_args.args[0]
+    assert "@me: 0/1 · ⏸ paused, tap Resume all" in card
+
+    await app.cmd_resume(fake_message())
+    assert (await db.get_account(acc)).status == "active"
+    card = app.bot.edit_message_text.await_args.args[0]
+    assert "@me: 0/1 · starting…" in card
+
+
 async def test_worker_runs_accounts_at_the_same_time(tmp_path):
     import asyncio
 

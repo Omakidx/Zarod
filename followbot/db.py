@@ -246,6 +246,11 @@ class Database:
         cur = await self.conn.execute("SELECT * FROM jobs WHERE batch_id = ? OR id = ? ORDER BY id", (batch_id, batch_id))
         return [_job(r) for r in await cur.fetchall()]
 
+    async def open_batches(self) -> list[int]:
+        cur = await self.conn.execute(
+            "SELECT DISTINCT COALESCE(batch_id, id) AS b FROM jobs WHERE status = 'queued' ORDER BY b")
+        return [r["b"] for r in await cur.fetchall()]
+
     async def accounts_with_pending(self) -> list[int]:
         cur = await self.conn.execute("SELECT DISTINCT account_id FROM tasks WHERE status = 'pending'")
         return [r["account_id"] for r in await cur.fetchall()]
