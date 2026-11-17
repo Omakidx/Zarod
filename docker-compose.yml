@@ -1,33 +1,71 @@
 # Run through ./dc (not plain `docker compose`): it loads secrets from .env.local
 # and runs the bot as your own user so ./data needs no sudo.
 #
-# The gluetun container connects to ONE pinned Surfshark server. Only the bot's
-# X/Instagram traffic goes through it (via its HTTP proxy); Telegram uses your normal connection.
+# One gluetun container per Ashburn Surfshark server, each pinned to one server IP, so each
+# gives its own fixed exit IP. Every account the bot adds gets a location of its own (main,
+# ash2, ash3, …) and keeps it. Only the bot's X/Instagram traffic goes through them (via their
+# HTTP proxies); Telegram uses your normal connection.
+#
+# To see the Ashburn server IPs:
+#   docker run --rm qmcgaw/gluetun:v3.40.0 format-servers -surfshark -format json \
+#     | python3 -c "import json,sys;[print(s['ips']) for s in json.load(sys.stdin) if s['hostname']=='us-ash.prod.surfshark.com' and s['vpn']=='wireguard']"
+# To add a sixth location: copy the vpn5 block as vpn6 with another IP, and add ash6 to PROXIES below.
+
+x-vpn: &vpn
+  image: qmcgaw/gluetun:v3.40.0
+  cap_add: [NET_ADMIN]
+  devices: ["/dev/net/tun:/dev/net/tun"]
+  restart: unless-stopped
+  # No ports are published: the proxies are reachable only by the bot on the compose network.
+
+x-vpn-env: &vpn-env
+  VPN_SERVICE_PROVIDER: surfshark
+  VPN_TYPE: wireguard
+  WIREGUARD_PRIVATE_KEY: ${SURFSHARK_WG_PRIVATE_KEY:?set SURFSHARK_WG_PRIVATE_KEY in .env.local (and run via ./dc)}
+  WIREGUARD_ADDRESSES: 10.14.0.2/16
+  SERVER_HOSTNAMES: ${VPN_HOSTNAME:?set VPN_HOSTNAME in .env.local}
+  HTTPPROXY: "on"
+  HTTPPROXY_LISTENING_ADDRESS: ":8888"
+  HTTPPROXY_STEALTH: "on"
 
 services:
+  # "main": the server the first accounts were set up on (exit 45.144.115.27).
   vpn:
-    image: qmcgaw/gluetun:v3.40.0
-    cap_add: [NET_ADMIN]
-    devices: ["/dev/net/tun:/dev/net/tun"]
-    restart: unless-stopped
-    # No ports are published: the proxy is reachable only by the bot on the compose network.
+    <<: *vpn
     environment:
-      VPN_SERVICE_PROVIDER: surfshark
-      VPN_TYPE: wireguard
-      WIREGUARD_PRIVATE_KEY: ${SURFSHARK_WG_PRIVATE_KEY:?set SURFSHARK_WG_PRIVATE_KEY in .env.local (and run via ./dc)}
-      WIREGUARD_ADDRESSES: 10.14.0.2/16
-      # Pin one server so the exit IP stays the same. List them with:
-      #   docker run --rm qmcgaw/gluetun:v3.40.0 format-servers -surfshark
-      SERVER_HOSTNAMES: ${VPN_HOSTNAME:?set VPN_HOSTNAME in .env.local}
-      HTTPPROXY: "on"
-      HTTPPROXY_LISTENING_ADDRESS: ":8888"
-      HTTPPROXY_STEALTH: "on"
+      <<: *vpn-env
+      VPN_ENDPOINT_IP: ${VPN_ENDPOINT_IP_1:-45.144.115.26}
+
+  vpn2:
+    <<: *vpn
+    environment:
+      <<: *vpn-env
+      VPN_ENDPOINT_IP: ${VPN_ENDPOINT_IP_2:-45.144.115.34}
+
+  vpn3:
+    <<: *vpn
+    environment:
+      <<: *vpn-env
+      VPN_ENDPOINT_IP: ${VPN_ENDPOINT_IP_3:-37.19.206.34}
+
+  vpn4:
+    <<: *vpn
+    environment:
+      <<: *vpn-env
+      VPN_ENDPOINT_IP: ${VPN_ENDPOINT_IP_4:-149.102.227.103}
+
+  vpn5:
+    <<: *vpn
+    environment:
+      <<: *vpn-env
+      VPN_ENDPOINT_IP: ${VPN_ENDPOINT_IP_5:-185.156.46.102}
 
   bot:
     build: .
     env_file: .env.local
     environment:
-      PROXIES: main=http://vpn:8888
+      # One location per VPN container; new accounts get the first one nobody uses yet.
+      PROXIES: main=http://vpn:8888,ash2=http://vpn2:8888,ash3=http://vpn3:8888,ash4=http://vpn4:8888,ash5=http://vpn5:8888
       REQUIRE_PROXY: "true"
       DB_PATH: /data/followbot.db
     user: "${HOST_UID:-10001}:${HOST_GID:-10001}"
@@ -38,7 +76,16 @@ services:
     tmpfs: [/tmp]
     cap_drop: [ALL]
     security_opt: ["no-new-privileges:true"]
+    # Only "main" must be up for the bot to start; an account whose VPN is down just waits and retries.
     depends_on:
       vpn:
         condition: service_healthy
+      vpn2:
+        condition: service_started
+      vpn3:
+        condition: service_started
+      vpn4:
+        condition: service_started
+      vpn5:
+        condition: service_started
     restart: unless-stopped

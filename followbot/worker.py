@@ -6,6 +6,7 @@ import asyncio
 import logging
 import random
 import time
+from collections import Counter
 from typing import Callable, Protocol
 
 from .config import Settings
@@ -39,6 +40,43 @@ def vault_context(platform: str, username: str) -> str:
 
 class ProxyMissing(Exception):
     pass
+
+
+def pick_location(settings: Settings, accounts: list) -> str | None:
+    """A VPN location for a new account: the first one no account uses yet, else the least used.
+
+    Each location is one Ashburn server with its own exit IP, so accounts don't share an IP
+    until there are more accounts than locations.
+    """
+    if not settings.proxies:
+        return None
+    used = Counter(a.proxy_name for a in accounts)
+    return min(settings.proxies, key=lambda name: (used[name], list(settings.proxies).index(name)))
+
+
+async def spread_locations(db, settings: Settings) -> list[tuple]:
+    """Give accounts that share a location (or have a missing one) a location of their own.
+
+    The oldest account on each location keeps it. Returns (account, new location) for each move.
+    """
+    accounts = sorted(await db.list_accounts(), key=lambda a: a.id)
+    kept, moves = [], []
+    for account in accounts:
+        taken = {a.proxy_name for a in kept}
+        if account.proxy_name in settings.proxies and account.proxy_name not in taken:
+            kept.append(account)
+            continue
+        free = [name for name in settings.proxies if name not in taken]
+        if not free and account.proxy_name in settings.proxies:
+            kept.append(account)  # more accounts than locations: leave it where it is
+            continue
+        new = free[0] if free else pick_location(settings, kept)
+        if new and new != account.proxy_name:
+            await db.set_account_location(account.id, new)
+            moves.append((account, new))
+            account.proxy_name = new
+        kept.append(account)
+    return moves
 
 
 def proxy_url(settings: Settings, proxy_name: str | None) -> str | None:

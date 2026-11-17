@@ -13,11 +13,11 @@ A personal Telegram bot that follows X and Instagram accounts for you, from your
 | [execution-phase.md](execution-phase.md) | Every remaining step to go live, and the points where **you** need to act (marked 🙋) |
 | [my-use-flow.md](my-use-flow.md) | Day-to-day use: connecting accounts, following, alerts, refreshing cookies |
 
-It runs **on this machine** in Docker. X and Instagram traffic goes out through one pinned Surfshark server (gluetun); Telegram uses your normal connection.
+It runs **on this machine** in Docker. X and Instagram traffic goes out through Surfshark's Ashburn servers (one gluetun container per server, so each account has its own IP); Telegram uses your normal connection.
 
 ## What it does
 
-- **Connect accounts with cookies.** You send `/connect`, choose X or Instagram, then a VPN location, then paste the JSON export from your cookie extension. The bot deletes your message, checks the session through the VPN, and stores the cookies encrypted (AES-256-GCM). It never uses passwords or the paid official APIs.
+- **Connect accounts with cookies.** You tap **Add account**, choose X or Instagram, then send the JSON export from your cookie extension. The bot deletes your message, checks the session through the VPN, and stores the cookies encrypted (AES-256-GCM). It never uses passwords or the paid official APIs.
 - **Follow one account or a list.** `/follow` takes handles, `@handles`, profile links, or a `.txt`/`.csv` file. You see a preview first (duplicates, invalid entries, ETA, daily-cap warning), then press **Start**. Progress shows up live, and a final report lists anything that failed.
 - **Pacing.** Each account gets at most **14 follows per 10 minutes** (single follows count too), with random 25–60 s gaps, plus a daily cap (X 200, Instagram 100). Accounts you already follow are skipped without spending budget.
 - **Safety stops:**
@@ -25,7 +25,7 @@ It runs **on this machine** in Docker. X and Instagram traffic goes out through 
   - **Session expired:** the queue is held until you reconnect.
   - **Challenge or locked account:** the queue is held until you fix it in the app and send `/resume`.
   - **VPN down:** follows are retried, and nothing is ever sent outside the VPN.
-- **VPN.** Each account is pinned to one Surfshark server through gluetun. Only X and Instagram traffic goes through the VPN.
+- **VPN.** Each account gets its own Ashburn Surfshark server, and so its own exit IP, and keeps it. Five servers run by default (`main`, `ash2` … `ash5`); a sixth account would share the least-used one. Only X and Instagram traffic goes through the VPN.
 
 ## Where things are
 

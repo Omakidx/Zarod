@@ -98,6 +98,6 @@ def test_config_cookie_files():
     s = load_settings(base)
     assert isinstance(s.encryption_key, bytes) and len(s.encryption_key) == 32
     assert s.cookie_files == {"x": "/secrets/x.cookies.json"}
-    assert s.import_location == "main"
+    assert s.import_location is None  # each imported account gets its own location
     with pytest.raises(ConfigError):
         load_settings({**base, "COOKIES_LOCATION": "elsewhere"})

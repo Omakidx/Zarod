@@ -10,7 +10,7 @@
 | Browser fingerprint | curl_cffi | 0.16.3 | Used as httpx's transport for Instagram, so connections look like your browser's (not browser automation) |
 | Storage | SQLite via aiosqlite | 0.22.1 | One file, no server, enough for one owner |
 | Encryption | cryptography (AES-256-GCM) | 50.0.2 | Authenticated encryption of the stored cookies |
-| VPN | gluetun + Surfshark (WireGuard) | gluetun v3.40.0 | A container with a built-in HTTP proxy, so only X and Instagram traffic goes through the VPN |
+| VPN | gluetun + Surfshark (WireGuard) | gluetun v3.40.0 | One container per Ashburn server, each pinned to a server IP (`VPN_ENDPOINT_IP`) and exposing an HTTP proxy, so each account has its own fixed exit IP and only X/Instagram traffic uses the VPN |
 | Runtime | Docker Compose, via the `./dc` wrapper, on this machine | — | One command starts the bot and the VPN together. `./dc` loads `.env.local` and runs the bot as your user |
 | Tests | pytest + pytest-asyncio | 8.3.5 / 0.25.3 | Run fully offline against mocked platform responses |
 
@@ -26,10 +26,10 @@ There are no paid APIs, no browser automation (Playwright/Chrome), and no Redis 
                                         └───────────┬────────────────┘
                                                     │ X / Instagram requests only
                                                     ▼
-                                    gluetun "vpn" (HTTP proxy :8888)    
+              gluetun vpn, vpn2 … vpn5 (one per account, HTTP proxy :8888 each)    
                                                     │ WireGuard
                                                     ▼
-                                   Surfshark server (one pinned hostname)
+                          Surfshark Ashburn servers (one per account, own exit IP)
                                                     │
                                                     ▼
                                          x.com  /  instagram.com

@@ -22,7 +22,7 @@ from .db import Account, Database
 from .handles import MAX_HANDLES_PER_JOB, parse_handles
 from .platforms import PlatformError, make_adapter
 from .ratelimit import DAY, estimate_seconds
-from .worker import ProxyMissing, Worker, human_duration, proxy_url, vault_context
+from .worker import ProxyMissing, Worker, human_duration, pick_location, proxy_url, vault_context
 
 log = logging.getLogger(__name__)
 
@@ -78,7 +78,7 @@ def _cookie_help(platform: str) -> str:
     site = "x.com" if platform == "x" else "instagram.com"
     return (
         f"Send your <b>{PLATFORM_NAMES[platform]}</b> cookie export as JSON.\n\n"
-        f"1. With your VPN on the same location, log in at {site} in your browser.\n"
+        f"1. With Surfshark on Ashburn, log in at {site} in your browser.\n"
         f"2. Export the cookies with your extension (JSON).\n"
         f"3. Paste them here, or send them as a <code>.json</code> file. Use a file if the export is long, "
         f"because Telegram splits long messages.\n\n"
@@ -231,17 +231,9 @@ class BotApp:
     async def on_platform(self, query: CallbackQuery, callback_data: Pick, state: FSMContext) -> None:
         await query.answer()
         await state.update_data(platform=callback_data.value)
-        locations = list(self.settings.proxies)
-        if len(locations) > 1:
-            rows = [[(name, Pick(kind="location", value=name), "location", ui.BLUE)] for name in locations]
-            rows.append([_cancel()])
-            await query.message.edit_text(
-                "Which VPN location should this account always use?\n"
-                "Pick the one you'll log in through in your browser, and keep it the same from now on.",
-                reply_markup=_kb(rows),
-            )
-            return
-        await self._ask_cookies(query.message, state, locations[0] if locations else None)
+        # Each new account gets a VPN location (an Ashburn IP) of its own; an account you
+        # reconnect keeps the one it already has.
+        await self._ask_cookies(query.message, state, pick_location(self.settings, await self.db.list_accounts()))
 
     async def on_location(self, query: CallbackQuery, callback_data: Pick, state: FSMContext) -> None:
         await query.answer()
@@ -254,7 +246,8 @@ class BotApp:
         await state.update_data(location=location)
         await state.set_state(ConnectFlow.cookies)
         platform = (await state.get_data())["platform"]
-        where = f"\n🌍 VPN location: <b>{html.escape(location)}</b>" if location else ""
+        where = (f"\n🌍 A new account gets its own IP: <b>{html.escape(location)}</b>. "
+                 "One you reconnect keeps its current one.") if location else ""
         await message.edit_text(_cookie_help(platform) + where, reply_markup=_kb([[_cancel()]]))
 
     async def on_cookies(self, message: Message, state: FSMContext) -> None:
@@ -309,6 +302,8 @@ class BotApp:
         await self.worker.forget(account_id)
         self.worker.wake()
         await state.clear()
+        saved = await self.db.get_account(account_id)
+        location = saved.proxy_name if saved else location
         where = f" via 🌍 {html.escape(location)}" if location else ""
         await status.edit_text(f"✅ Connected {PLATFORM_NAMES[platform]} as <b>@{html.escape(username)}</b>{where}.\nTap <b>Follow accounts</b> to start.")
 

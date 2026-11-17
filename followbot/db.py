@@ -118,7 +118,8 @@ class Database:
             ON CONFLICT (platform, username) DO UPDATE SET
                 cookies_enc = excluded.cookies_enc,
                 user_agent = excluded.user_agent,
-                proxy_name = excluded.proxy_name,
+                -- an account keeps its VPN location (and so its IP) once it has one
+                proxy_name = COALESCE(accounts.proxy_name, excluded.proxy_name),
                 status = 'active', paused_until = 0, pause_reason = NULL
             RETURNING id
             """,
@@ -139,6 +140,10 @@ class Database:
         else:
             cur = await self.conn.execute("SELECT * FROM accounts ORDER BY platform, id")
         return [_account(r) for r in await cur.fetchall()]
+
+    async def set_account_location(self, account_id: int, proxy_name: str) -> None:
+        await self.conn.execute("UPDATE accounts SET proxy_name = ? WHERE id = ?", (proxy_name, account_id))
+        await self.conn.commit()
 
     async def delete_account(self, account_id: int) -> None:
         # Forget the cookie-file import too, so the next start imports that file again.

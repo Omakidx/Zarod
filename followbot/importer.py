@@ -16,7 +16,7 @@ from .cookies import CookieError, parse_cookie_export
 from .crypto import CookieVault
 from .db import Database
 from .platforms import PlatformError, make_adapter
-from .worker import AdapterFactory, ProxyMissing, Worker, proxy_url, vault_context
+from .worker import AdapterFactory, ProxyMissing, Worker, pick_location, proxy_url, vault_context
 
 log = logging.getLogger(__name__)
 
@@ -44,10 +44,12 @@ async def import_cookie_files(
         if digest == await db.last_import_hash(platform):
             continue
 
+        # A new account gets a location (an Ashburn IP) nobody else uses; a known one keeps its own.
+        location = settings.import_location or pick_location(settings, await db.list_accounts())
         try:
             cookies = parse_cookie_export(raw, platform)
             adapter = adapter_factory(
-                platform, cookies, settings.user_agent_for(platform), proxy_url(settings, settings.import_location)
+                platform, cookies, settings.user_agent_for(platform), proxy_url(settings, location)
             )
         except (CookieError, ProxyMissing) as exc:
             await report(f"❌ {name}: secrets/{file_name}: {exc}")
@@ -71,9 +73,10 @@ async def import_cookie_files(
             username,
             vault.encrypt(vault_context(platform, username), cookies),
             settings.user_agent_for(platform),
-            settings.import_location,
+            location,
         )
         await db.set_import_hash(platform, digest)
         await worker.forget(account_id)
-        where = f" via 🌍 {settings.import_location}" if settings.import_location else ""
+        account = await db.get_account(account_id)
+        where = f" via 🌍 {account.proxy_name}" if account and account.proxy_name else ""
         await report(f"✅ Imported {name} @{username} from secrets/{file_name}{where}. Tap Follow accounts to start.")

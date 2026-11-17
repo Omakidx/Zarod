@@ -113,7 +113,8 @@ def load_settings(env: dict[str, str] | None = None) -> Settings:
         name = env.get(file_var, "").strip()
         if name:
             cookie_files[platform] = os.path.join(secrets_dir, name)
-    import_location = env.get("COOKIES_LOCATION", "").strip() or next(iter(proxies), None)
+    # Empty: each imported account gets a location of its own, like accounts added in Telegram.
+    import_location = env.get("COOKIES_LOCATION", "").strip() or None
     if cookie_files and import_location and import_location not in proxies:
         raise ConfigError(f"COOKIES_LOCATION {import_location!r} is not in PROXIES")
 

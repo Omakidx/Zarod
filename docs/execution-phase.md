@@ -184,7 +184,7 @@ While you do this, Claude watches `./dc logs -f bot` and the database counters (
 
 ## Optional later work (not started)
 
-- A second Surfshark location: add a second gluetun service and a `PROXIES` entry.
+- ✅ Done: one Ashburn server per account (`vpn` … `vpn5` in `docker-compose.yml`). To add more, copy the `vpn5` block with another Ashburn IP and add it to `PROXIES`.
 - Pin the base images by digest and use `pip --require-hashes`. This hardens the supply chain.
 - Unfollow, or "follow these at a set time".
 - More platforms (Threads, TikTok) as new adapters in `followbot/platforms/`.

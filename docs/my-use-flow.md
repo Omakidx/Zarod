@@ -22,7 +22,7 @@ There are two ways to connect:
 1. On your computer, **turn Surfshark on and pick the same server** the bot uses (the one in `VPN_HOSTNAME`).
 2. Log in to x.com or instagram.com in your browser.
 3. Click your cookie extension and **export as JSON**.
-4. In the bot, tap **🔗 Add account**, choose **Instagram** or **X**, then the **VPN location** (this only appears if you've set up more than one). **Cancel** is always there if you change your mind.
+4. In the bot, tap **🔗 Add account**, choose **Instagram** or **X**. The bot gives every new account **its own Ashburn IP** automatically (locations `main`, `ash2` … `ash5`), and an account you reconnect keeps the IP it has. **Cancel** is always there if you change your mind.
 5. Paste the JSON. If it's long, save it as a `.json` file and send the file instead, because Telegram splits long messages. Pasting is slightly better: a deleted upload stays on Telegram's servers.
 6. The bot deletes your message, checks the session, and replies **✅ Connected as @you via 🌍 main**.
 
@@ -97,7 +97,7 @@ When the job finishes, you get a separate message listing the accounts that were
 
 ## 5. Habits that keep your accounts safe
 
-- **Always log in through the same Surfshark server** the bot uses for that account. Never switch the location afterwards.
+- **Log in and export through Surfshark on Ashburn.** Each account then runs from its own fixed Ashburn IP in the bot; never move an account to another location by hand.
 - Don't follow by hand from your phone in large bursts while the bot is running. Both count toward the platform's limits.
 - Start a new account at low caps (see [execution-phase.md](execution-phase.md), phase 6) and raise them slowly.
 - If the bot ever gets added to a group, it ignores everything there. Use it only in your private chat with it.

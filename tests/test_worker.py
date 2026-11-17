@@ -169,3 +169,44 @@ async def test_missing_proxy_blocks_account(env):
     await worker.tick()
     assert (await db.get_account(acc)).status == "blocked"
     assert holder["adapter"].calls == []
+
+
+async def test_locations_one_ip_per_account(tmp_path):
+    from dataclasses import replace
+
+    from followbot.worker import pick_location, spread_locations
+
+    db = await Database.open(str(tmp_path / "loc.db"))
+    settings = Settings(
+        bot_token="t", owner_id=1, encryption_key=b"0" * 32, db_path="", require_proxy=True, user_agent="ua",
+        proxies={"main": "http://vpn:8888", "ash2": "http://vpn2:8888", "ash3": "http://vpn3:8888"}, limits=Limits(),
+    )
+    try:
+        assert pick_location(settings, []) == "main"
+        # Two accounts were set up before locations existed: both on main.
+        x = await db.upsert_account("x", "a", "c", "ua", "main")
+        ig = await db.upsert_account("instagram", "b", "c", "ua", "main")
+        assert pick_location(settings, await db.list_accounts()) == "ash2"
+
+        moves = await spread_locations(db, settings)
+        assert [(a.username, loc) for a, loc in moves] == [("b", "ash2")]
+        assert (await db.get_account(x)).proxy_name == "main"  # the oldest keeps its IP
+        assert (await db.get_account(ig)).proxy_name == "ash2"
+        assert await spread_locations(db, settings) == []  # nothing left to move
+
+        # Reconnecting an account keeps its location even if another one is offered.
+        await db.upsert_account("instagram", "b", "c2", "ua", "ash3")
+        assert (await db.get_account(ig)).proxy_name == "ash2"
+
+        # A third account gets the last free location; a fourth shares the least-used one.
+        third = pick_location(settings, await db.list_accounts())
+        assert third == "ash3"
+        await db.upsert_account("instagram", "c", "c", "ua", third)
+        assert pick_location(settings, await db.list_accounts()) == "main"
+
+        # An account whose location was removed from PROXIES is moved to a configured one.
+        fewer = replace(settings, proxies={"main": "http://vpn:8888", "ash2": "http://vpn2:8888"})
+        moves = await spread_locations(db, fewer)
+        assert [(a.username, loc) for a, loc in moves] == [("c", "main")]
+    finally:
+        await db.close()

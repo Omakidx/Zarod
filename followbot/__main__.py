@@ -31,7 +31,8 @@ async def run_bot() -> None:
     from .db import Database
     from .importer import import_cookie_files
     from .ui import IconFallback
-    from .worker import Worker
+    from .config import PLATFORM_NAMES
+    from .worker import Worker, spread_locations
 
     settings = load_settings()
     os.makedirs(os.path.dirname(settings.db_path) or ".", exist_ok=True)
@@ -60,12 +61,14 @@ async def run_bot() -> None:
     await setup_commands(bot)
 
     async def report(text: str) -> None:
-        log.info("cookie import: %s", text)
+        log.info("startup: %s", text)
         try:
             await app.alert(text)
         except Exception as exc:  # e.g. you haven't pressed /start in the bot yet
             log.warning("couldn't message the owner: %s", type(exc).__name__)
 
+    for account, location in await spread_locations(db, settings):
+        await report(f"🌍 {PLATFORM_NAMES[account.platform]} @{account.username} now has its own IP: location {location}.")
     await import_cookie_files(settings, db, vault, worker, report)
     worker_task = asyncio.create_task(worker.run(), name="follow-worker")
     try:
