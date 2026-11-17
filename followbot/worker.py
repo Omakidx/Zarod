@@ -195,6 +195,11 @@ class Worker:
         task = await self.db.next_task(account.id)
         if task is None:
             return
+        if await self.db.followed_before(account.id, task.handle):
+            # Instagram's follow call answers "following" either way, so it can't tell us this itself.
+            await self.db.finish_task(task.id, "already", "followed earlier by this bot")
+            await self._after_task(task.job_id)
+            return
         name = f"@{account.username} ({account.platform})"
         now = self.clock()
 

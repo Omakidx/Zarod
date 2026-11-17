@@ -41,12 +41,18 @@ STAGGER_SECONDS = 8
 STATUS_ICONS = [
     ("followed", "✅ followed"),
     ("requested", "🔒 requested"),
-    ("already", "↩️ already"),
+    ("already", "↩️ already followed"),
     ("not_found", "❓ not found"),
     ("unavailable", "🚫 unavailable"),
     ("failed", "⚠️ failed"),
     ("cancelled", "✖️ cancelled"),
 ]
+# What the finished report lists by name, and how it explains each.
+PROBLEMS = {
+    "not_found": "❓ Not found, or hidden from {who}",
+    "unavailable": "🚫 Can't be followed by {who} (blocked or suspended)",
+    "failed": "⚠️ Failed for {who} after retries",
+}
 # Why an account's queued follows aren't moving, shown on the job card.
 HELD = {"paused": "⏸ paused, tap Resume all", "blocked": "⛔ blocked, tap Resume all",
         "expired": "🔑 needs new cookies (Add account)"}
@@ -131,22 +137,28 @@ class BotApp:
             return
         self._reported.add(job.batch_id)
         await self._render_job(job_id, final=True)
-        lines = [f"Job #{job.batch_id} finished."]
-        shown = 0
+        totals: dict[str, int] = {}
+        sections = []
         for j in jobs:
+            for status, n in (await self.db.job_counts(j.id)).items():
+                totals[status] = totals.get(status, 0) + n
             account = await self.db.get_account(j.account_id)
-            problems = await self.db.job_task_details(j.id, ("not_found", "unavailable", "failed"))
-            if not problems:
-                continue
-            if len(jobs) > 1:
-                lines.append(f"<b>{_label(account) if account else 'removed account'}</b>")
-            for handle, status, detail in problems:
-                if shown < 50:
-                    suffix = f" ({html.escape(detail)})" if detail else ""
-                    lines.append(f"• @{html.escape(handle)}: {status.replace('_', ' ')}{suffix}")
-                shown += 1
-        if shown > 50:
-            lines.append(f"…and {shown - 50} more")
+            who = f"@{html.escape(account.username)}" if account else "a removed account"
+            problems = await self.db.job_task_details(j.id, tuple(PROBLEMS))
+            for status, heading in PROBLEMS.items():
+                rows = [(h, d) for h, st, d in problems if st == status]
+                if not rows:
+                    continue
+                handles = ", ".join("@" + html.escape(h) for h, _ in rows[:40])
+                if len(rows) > 40:
+                    handles += f", … +{len(rows) - 40}"
+                sections.append(f"{heading.format(who=who)} ({len(rows)}): {handles}")
+                if status == "failed":
+                    sections.append(f"   last error: {html.escape(rows[-1][1][:120])}")
+        summary = " · ".join(f"{label} {totals[st]}" for st, label in STATUS_ICONS if totals.get(st))
+        lines = [f"🏁 <b>Job #{job.batch_id} finished</b>", summary or "Nothing to do."]
+        if sections:
+            lines += [""] + sections
         await self.bot.send_message(job.chat_id, "\n".join(lines))
 
     async def _render_job(self, job_id: int, final: bool) -> None:

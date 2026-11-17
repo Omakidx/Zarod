@@ -317,6 +317,15 @@ class Database:
         await self.conn.commit()
         return len(job_ids)
 
+    async def followed_before(self, account_id: int, handle: str) -> bool:
+        """Whether this account already followed (or requested) this handle in an earlier task."""
+        cur = await self.conn.execute(
+            "SELECT 1 FROM tasks WHERE account_id = ? AND lower(handle) = lower(?) "
+            "AND status IN ('followed', 'requested', 'already') LIMIT 1",
+            (account_id, handle),
+        )
+        return await cur.fetchone() is not None
+
     async def pending_handles(self, account_id: int) -> set[str]:
         cur = await self.conn.execute(
             "SELECT handle FROM tasks WHERE account_id = ? AND status = 'pending'", (account_id,)

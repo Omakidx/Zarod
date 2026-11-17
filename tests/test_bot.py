@@ -165,6 +165,25 @@ async def test_job_card_says_when_the_next_follow_is_due(env):
     assert "one every 30–30 s per account" in card
 
 
+async def test_finished_report_is_a_summary_with_grouped_problems(env):
+    db, worker, *_ = env
+    app = make_app(db, worker)
+    app._reported = set()
+    acc = (await db.list_accounts("x"))[0].id
+    job = await db.create_job(acc, 1, ["a", "b", "c", "d"])
+    tasks = [r["id"] for r in await (await db.conn.execute("SELECT id FROM tasks WHERE job_id = ? ORDER BY id", (job,))).fetchall()]
+    for task, (status, detail) in zip(tasks, [("followed", ""), ("already", ""), ("not_found", "error route 201 chars"),
+                                             ("not_found", "error route 201 chars")]):
+        await db.finish_task(task, status, detail)
+    await db.finish_job_if_complete(job)
+    await app.job_finished(job)
+    report = app.bot.send_message.await_args.args[1]
+    assert "Job #%d finished" % job in report
+    assert "✅ followed 1 · ↩️ already followed 1 · ❓ not found 2" in report
+    assert "❓ Not found, or hidden from @me (2): @c, @d" in report
+    assert "error route" not in report
+
+
 async def test_worker_runs_accounts_at_the_same_time(tmp_path):
     import asyncio
 
