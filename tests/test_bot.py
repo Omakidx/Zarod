@@ -83,3 +83,91 @@ async def test_icon_fallback_resends_without_icons():
         assert not any(b.icon_custom_emoji_id for row in ui.main_menu().keyboard for b in row)
     finally:
         ui.state.icons = True
+
+
+async def add_x_account(db, worker, name):
+    return await db.upsert_account("x", name, worker.vault.encrypt(f"x:{name}", {"auth_token": "A", "ct0": "C"}), "ua", "us")
+
+
+async def test_follow_uses_every_account_on_the_platform_in_one_batch(env):
+    db, worker, *_ = env
+    second = await add_x_account(db, worker, "two")
+    app, state, msg = make_app(db, worker), fsm(), fake_message()
+    app._reported = set()
+    await app.cmd_follow(msg, state, CommandObject(prefix="/", command="follow", args="@alice @bob"))
+    assert "from <b>2 X accounts</b> at the same time" in msg.answer.await_args.args[0]
+
+    query = SimpleNamespace(answer=AsyncMock(), message=SimpleNamespace(
+        chat=SimpleNamespace(id=1), message_id=77, edit_text=AsyncMock()))
+    await app.on_confirm(query, SimpleNamespace(value="yes"), state)
+    jobs = await db.batch_jobs(1)
+    assert sorted(j.account_id for j in jobs) == sorted([(await db.list_accounts("x"))[0].id, second])
+    assert {j.batch_id for j in jobs} == {jobs[0].id} and {j.message_id for j in jobs} == {77}
+    assert [await db.job_counts(j.id) for j in jobs] == [{"pending": 2}, {"pending": 2}]
+    # The second account starts a few seconds after the first.
+    assert (await db.get_account(second)).next_action_at > 0
+    text = app.bot.edit_message_text.await_args.args[0]
+    assert "X · 2 accounts" in text and "@me: 0/2" in text and "@two: 0/2" in text
+
+
+async def test_worker_runs_accounts_at_the_same_time(tmp_path):
+    import asyncio
+
+    from followbot.config import Limits, Settings
+    from followbot.crypto import CookieVault, generate_key
+    from followbot.db import Database
+    from followbot.platforms import FollowResult, Outcome
+    from followbot.worker import Worker
+
+    import base64
+    from test_worker import Notes
+
+    db = await Database.open(str(tmp_path / "p.db"))
+    vault = CookieVault(base64.urlsafe_b64decode(generate_key()))
+    settings = Settings(bot_token="t", owner_id=1, encryption_key=b"0" * 32, db_path="", require_proxy=True,
+                        user_agent="ua", proxies={"a": "http://vpn:8888", "b": "http://vpn2:8888"}, limits=Limits())
+    started, both = [], asyncio.Event()
+
+    class Slow:
+        def __init__(self, proxy):
+            self.proxy = proxy
+
+        async def follow(self, handle):
+            started.append(self.proxy)
+            if len(started) == 2:
+                both.set()
+            await asyncio.wait_for(both.wait(), 2)  # only finishes if the other account is running too
+            return FollowResult(Outcome.FOLLOWED, True)
+
+        def export_cookies(self):
+            return {"auth_token": "A", "ct0": "C"}
+
+        async def aclose(self):
+            pass
+
+    try:
+        ids = [await db.upsert_account("x", n, vault.encrypt(f"x:{n}", {"auth_token": "A", "ct0": "C"}), "ua", loc)
+               for n, loc in (("one", "a"), ("two", "b"))]
+        batch = await db.create_job(ids[0], 1, ["target"])
+        await db.create_job(ids[1], 1, ["target"], batch)
+        worker = Worker(db, vault, settings, Notes(), adapter_factory=lambda p, c, ua, proxy: Slow(proxy))
+        await worker.tick()
+        assert sorted(started) == ["http://vpn2:8888", "http://vpn:8888"]
+        assert [await db.job_counts(j.id) for j in await db.batch_jobs(batch)] == [{"followed": 1}, {"followed": 1}]
+    finally:
+        await db.close()
+
+
+async def test_accounts_button_asks_platform_then_lists_it(env):
+    db, worker, *_ = env
+    await db.upsert_account("instagram", "gram", worker.vault.encrypt("instagram:gram", {"sessionid": "S"}), "ua", "us")
+    app, msg = make_app(db, worker), fake_message()
+    await app.cmd_accounts(msg)
+    assert msg.answer.await_args.args[0] == "Which platform's accounts?"
+    buttons = [b.text for row in msg.answer.await_args.kwargs["reply_markup"].inline_keyboard for b in row]
+    assert "Instagram · 1 account" in buttons and "X · 1 account" in buttons
+
+    query = SimpleNamespace(answer=AsyncMock(), message=SimpleNamespace(edit_text=AsyncMock(), answer=AsyncMock()))
+    await app.on_accounts_platform(query, SimpleNamespace(value="instagram"))
+    cards = [c.args[0] for c in query.message.answer.await_args_list]
+    assert len(cards) == 1 and "@gram" in cards[0]

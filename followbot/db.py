@@ -27,6 +27,7 @@ CREATE TABLE IF NOT EXISTS jobs (
     account_id  INTEGER NOT NULL REFERENCES accounts(id) ON DELETE CASCADE,
     chat_id     INTEGER NOT NULL,
     message_id  INTEGER,
+    batch_id    INTEGER,                             -- jobs started together share one (the first job's id)
     status      TEXT NOT NULL DEFAULT 'queued',      -- queued | done | cancelled
     created_at  REAL NOT NULL
 );
@@ -87,6 +88,11 @@ class Job:
     chat_id: int
     message_id: int | None
     status: str
+    batch_id: int | None = None
+
+
+def _job(row) -> Job:
+    return Job(row["id"], row["account_id"], row["chat_id"], row["message_id"], row["status"], row["batch_id"] or row["id"])
 
 
 class Database:
@@ -100,6 +106,10 @@ class Database:
         await conn.execute("PRAGMA foreign_keys = ON")
         await conn.execute("PRAGMA journal_mode = WAL")
         await conn.executescript(SCHEMA)
+        # Databases created before batches existed.
+        columns = {r["name"] for r in await (await conn.execute("PRAGMA table_info(jobs)")).fetchall()}
+        if "batch_id" not in columns:
+            await conn.execute("ALTER TABLE jobs ADD COLUMN batch_id INTEGER")
         await conn.commit()
         return cls(conn)
 
@@ -208,12 +218,14 @@ class Database:
 
     # ---- jobs & tasks ----
 
-    async def create_job(self, account_id: int, chat_id: int, handles: list[str]) -> int:
+    async def create_job(self, account_id: int, chat_id: int, handles: list[str], batch_id: int | None = None) -> int:
+        """One account's share of a follow request. Jobs started together pass the first job's id as batch_id."""
         cur = await self.conn.execute(
             "INSERT INTO jobs (account_id, chat_id, created_at) VALUES (?, ?, ?) RETURNING id",
             (account_id, chat_id, time.time()),
         )
         job_id = (await cur.fetchone())["id"]
+        await self.conn.execute("UPDATE jobs SET batch_id = ? WHERE id = ?", (batch_id or job_id, job_id))
         await self.conn.executemany(
             "INSERT INTO tasks (job_id, account_id, handle) VALUES (?, ?, ?)",
             [(job_id, account_id, h) for h in handles],
@@ -228,7 +240,11 @@ class Database:
     async def get_job(self, job_id: int) -> Job | None:
         cur = await self.conn.execute("SELECT * FROM jobs WHERE id = ?", (job_id,))
         row = await cur.fetchone()
-        return Job(row["id"], row["account_id"], row["chat_id"], row["message_id"], row["status"]) if row else None
+        return _job(row) if row else None
+
+    async def batch_jobs(self, batch_id: int) -> list[Job]:
+        cur = await self.conn.execute("SELECT * FROM jobs WHERE batch_id = ? OR id = ? ORDER BY id", (batch_id, batch_id))
+        return [_job(r) for r in await cur.fetchall()]
 
     async def accounts_with_pending(self) -> list[int]:
         cur = await self.conn.execute("SELECT DISTINCT account_id FROM tasks WHERE status = 'pending'")

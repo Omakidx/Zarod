@@ -157,17 +157,18 @@ class Worker:
 
     async def tick(self) -> float:
         """Run every task that is due right now; return seconds until the next one may be."""
+        accounts = [a for a in [await self.db.get_account(i) for i in await self.db.accounts_with_pending()] if a]
+        due = [a for a in accounts if await self.ready_at(a) <= self.clock()]
+        # Accounts are independent (own cookies, own IP, own limits), so the due ones run at the same time.
+        results = await asyncio.gather(*(self.process_one(a) for a in due), return_exceptions=True)
+        for account, result in zip(due, results):
+            if isinstance(result, BaseException):
+                log.error("follow for account %s failed: %s", account.id, type(result).__name__)
         soonest = IDLE_POLL
-        for account_id in await self.db.accounts_with_pending():
-            account = await self.db.get_account(account_id)
-            if account is None:
-                continue
-            if await self.ready_at(account) <= self.clock():
-                await self.process_one(account)
-                account = await self.db.get_account(account_id)
-                if account is None:
-                    continue
-            soonest = min(soonest, await self.ready_at(account) - self.clock())
+        for account in accounts:
+            account = await self.db.get_account(account.id)
+            if account is not None:
+                soonest = min(soonest, await self.ready_at(account) - self.clock())
         return max(1.0, soonest)
 
     async def _adapter(self, account: Account) -> Adapter:

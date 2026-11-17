@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import html
 import logging
+import random
 import time
 
 from aiogram import Bot, F, Router
@@ -34,6 +35,9 @@ COMMANDS = [BotCommand(command="start", description="Show the menu")]
 
 PLATFORM_ICONS = {"x": "x", "instagram": "instagram"}
 
+# Seconds between the first follows of the accounts in one batch (randomised ±40%).
+STAGGER_SECONDS = 8
+
 STATUS_ICONS = [
     ("followed", "✅ followed"),
     ("requested", "🔒 requested"),
@@ -55,7 +59,7 @@ class FollowFlow(StatesGroup):
 
 
 class Pick(CallbackData, prefix="p"):
-    kind: str          # platform | location | account | confirm | acct | cancel
+    kind: str          # platform | location | fplat | aplat | confirm | acct | cancel
     value: str
 
 
@@ -96,6 +100,7 @@ class BotApp:
         self.settings = settings
         self.worker = worker
         self.router = Router(name="followbot")
+        self._reported: set[int] = set()  # batches whose final report was sent
         # Owner only, and only in the private chat (never echo cookies into a group).
         owner = F.from_user.id == settings.owner_id
         self.router.message.filter(owner, F.chat.type == "private")
@@ -112,34 +117,59 @@ class BotApp:
         await self._render_job(job_id, final=False)
 
     async def job_finished(self, job_id: int) -> None:
-        await self._render_job(job_id, final=True)
         job = await self.db.get_job(job_id)
         if job is None:
             return
-        problems = await self.db.job_task_details(job_id, ("not_found", "unavailable", "failed"))
-        lines = [f"Job #{job_id} finished."]
-        for handle, status, detail in problems[:50]:
-            suffix = f" ({html.escape(detail)})" if detail else ""
-            lines.append(f"• @{html.escape(handle)}: {status.replace('_', ' ')}{suffix}")
-        if len(problems) > 50:
-            lines.append(f"…and {len(problems) - 50} more")
+        jobs = await self.db.batch_jobs(job.batch_id)
+        if any(j.status == "queued" for j in jobs):
+            await self._render_job(job_id, final=False)  # other accounts are still going
+            return
+        if job.batch_id in self._reported:
+            return
+        self._reported.add(job.batch_id)
+        await self._render_job(job_id, final=True)
+        lines = [f"Job #{job.batch_id} finished."]
+        shown = 0
+        for j in jobs:
+            account = await self.db.get_account(j.account_id)
+            problems = await self.db.job_task_details(j.id, ("not_found", "unavailable", "failed"))
+            if not problems:
+                continue
+            if len(jobs) > 1:
+                lines.append(f"<b>{_label(account) if account else 'removed account'}</b>")
+            for handle, status, detail in problems:
+                if shown < 50:
+                    suffix = f" ({html.escape(detail)})" if detail else ""
+                    lines.append(f"• @{html.escape(handle)}: {status.replace('_', ' ')}{suffix}")
+                shown += 1
+        if shown > 50:
+            lines.append(f"…and {shown - 50} more")
         await self.bot.send_message(job.chat_id, "\n".join(lines))
 
     async def _render_job(self, job_id: int, final: bool) -> None:
+        """One live message per batch: a line per account."""
         job = await self.db.get_job(job_id)
         if job is None or job.message_id is None:
             return
-        account = await self.db.get_account(job.account_id)
-        counts = await self.db.job_counts(job_id)
-        total = sum(counts.values())
-        pending = counts.get("pending", 0)
-        parts = [f"{label} {counts[s]}" for s, label in STATUS_ICONS if counts.get(s)]
-        head = f"{'🏁' if final else '🔄'} <b>Job #{job_id}</b>"
-        if account:
-            head += f" · {_label(account)}"
-        text = f"{head}\n{total - pending}/{total} done\n" + (" · ".join(parts) or "starting…")
-        if pending:
-            text += f"\n⏳ {pending} left"
+        jobs = await self.db.batch_jobs(job.batch_id)
+        total = left = 0
+        rows = []
+        platform = None
+        for j in jobs:
+            account = await self.db.get_account(j.account_id)
+            counts = await self.db.job_counts(j.id)
+            n, pending = sum(counts.values()), counts.get("pending", 0)
+            total, left = total + n, left + pending
+            parts = [f"{label} {counts[s]}" for s, label in STATUS_ICONS if counts.get(s)]
+            name = f"@{html.escape(account.username)}" if account else "removed account"
+            platform = platform or (account.platform if account else None)
+            rows.append(f"{name}: {n - pending}/{n} · " + (" · ".join(parts) or "starting…"))
+        head = f"{'🏁' if final else '🔄'} <b>Job #{job.batch_id}</b>"
+        if platform:
+            head += f" · {PLATFORM_NAMES[platform]} · {len(jobs)} account{'s' if len(jobs) != 1 else ''}"
+        text = head + "\n" + "\n".join(rows)
+        if left:
+            text += f"\n⏳ {left} left"
         try:
             await self.bot.edit_message_text(text, chat_id=job.chat_id, message_id=job.message_id)
         except TelegramBadRequest:
@@ -163,7 +193,8 @@ class BotApp:
         r.message(Command("clearqueue"))(self.cmd_clearqueue)
         r.callback_query(Pick.filter(F.kind == "platform"))(self.on_platform)
         r.callback_query(Pick.filter(F.kind == "location"))(self.on_location)
-        r.callback_query(Pick.filter(F.kind == "account"))(self.on_account)
+        r.callback_query(Pick.filter(F.kind == "fplat"))(self.on_follow_platform)
+        r.callback_query(Pick.filter(F.kind == "aplat"))(self.on_accounts_platform)
         r.callback_query(Pick.filter(F.kind == "confirm"))(self.on_confirm)
         r.callback_query(Pick.filter(F.kind == "acct"))(self.on_account_action)
         r.callback_query(Pick.filter(F.kind == "cancel"))(self.on_cancel_button)
@@ -324,51 +355,58 @@ class BotApp:
 
     # -- follow --
 
+    async def _usable(self, platform: str | None = None) -> list[Account]:
+        """Accounts that can take follows (paused ones queue until resumed), optionally on one platform."""
+        return [a for a in await self.db.list_accounts(platform) if a.status in ("active", "paused")]
+
+    async def _platform_picker(self, message: Message, kind: str, prompt: str, accounts: list[Account]) -> None:
+        counts = {p: sum(a.platform == p for a in accounts) for p in PLATFORM_NAMES}
+        rows = [[(f"{PLATFORM_NAMES[p]} · {n} account{'s' if n != 1 else ''}", Pick(kind=kind, value=p),
+                  PLATFORM_ICONS[p], ui.BLUE)] for p, n in counts.items() if n]
+        rows.append([_cancel()])
+        await message.answer(prompt, reply_markup=_kb(rows))
+
     async def cmd_follow(self, message: Message, state: FSMContext, command: CommandObject | None = None) -> None:
-        """`/follow` asks for handles; `/follow @a @b` goes straight to the preview."""
+        """Every connected account on the chosen platform follows the list. `/follow @a @b` skips the handles step."""
         await state.clear()
         inline = ((command.args if command else None) or "").strip()
-        accounts = [a for a in await self.db.list_accounts() if a.status in ("active", "paused")]
+        accounts = await self._usable()
         if not accounts:
             await message.answer("No usable accounts yet. Tap <b>Add account</b> first.")
             return
-        if len(accounts) == 1:
-            if inline:
-                await state.update_data(account_id=accounts[0].id)
-                await self._preview(message, state, accounts[0], inline)
-            else:
-                await self._ask_handles(message, state, accounts[0], edit=False)
+        platforms = {a.platform for a in accounts}
+        if len(platforms) == 1:
+            await self._start_follow(message, state, platforms.pop(), inline, edit=False)
             return
         await state.update_data(pending_text=inline)
-        rows = [[(f"{PLATFORM_NAMES[a.platform]} @{a.username}", Pick(kind="account", value=str(a.id)),
-                  PLATFORM_ICONS[a.platform], ui.BLUE)] for a in accounts]
-        rows.append([_cancel()])
-        await message.answer("Follow from which account?", reply_markup=_kb(rows))
+        await self._platform_picker(message, "fplat", "Follow on which platform? All its accounts will follow.", accounts)
 
-    async def on_account(self, query: CallbackQuery, callback_data: Pick, state: FSMContext) -> None:
+    async def on_follow_platform(self, query: CallbackQuery, callback_data: Pick, state: FSMContext) -> None:
         await query.answer()
-        account = await self.db.get_account(int(callback_data.value))
-        if account is None:
-            await query.message.edit_text("That account is gone. Tap <b>Follow accounts</b> again.")
-            return
-        pending = (await state.get_data()).get("pending_text")
-        if pending:
-            await state.update_data(account_id=account.id, pending_text=None)
-            await query.message.edit_text(f"Following from <b>{_label(account)}</b>.")
-            await self._preview(query.message, state, account, pending)
-            return
-        await self._ask_handles(query.message, state, account, edit=True)
+        pending = (await state.get_data()).get("pending_text") or ""
+        await self._start_follow(query.message, state, callback_data.value, pending, edit=True)
 
-    async def _ask_handles(self, message: Message, state: FSMContext, account: Account, edit: bool) -> None:
+    async def _start_follow(self, message: Message, state: FSMContext, platform: str, text: str, edit: bool) -> None:
+        accounts = await self._usable(platform)
+        if not accounts:
+            await message.answer(f"No usable {PLATFORM_NAMES[platform]} accounts. Tap <b>Add account</b> first.")
+            return
+        await state.update_data(platform=platform, pending_text=None)
+        who = ", ".join(f"@{html.escape(a.username)}" for a in accounts)
+        head = f"Following from all {len(accounts)} {PLATFORM_NAMES[platform]} account{'s' if len(accounts) != 1 else ''}: {who}"
+        if text:
+            await (message.edit_text(head) if edit else message.answer(head))
+            await self._preview(message, state, platform, text)
+            return
         await state.set_state(FollowFlow.handles)
-        await state.update_data(account_id=account.id)
-        text = (
-            f"Following from <b>{_label(account)}</b>.\n\n"
+        prompt = (
+            f"{head}.\n\n"
             "Send one handle or a list: <code>@name</code>, <code>name</code>, or profile links, "
-            f"separated by spaces, commas, or new lines. You can also send a .txt/.csv file. "
+            "separated by spaces, commas, or new lines. You can also send a .txt/.csv file. "
             f"Up to {MAX_HANDLES_PER_JOB} per job."
         )
-        await (message.edit_text(text) if edit else message.answer(text))
+        markup = _kb([[_cancel()]])
+        await (message.edit_text(prompt, reply_markup=markup) if edit else message.answer(prompt, reply_markup=markup))
 
     async def on_handles(self, message: Message, state: FSMContext) -> None:
         if message.document:
@@ -378,29 +416,37 @@ class BotApp:
             text = (await self.bot.download(message.document)).read().decode("utf-8", errors="replace")
         else:
             text = message.text or ""
-
-        account = await self.db.get_account((await state.get_data())["account_id"])
-        if account is None:
+        platform = (await state.get_data()).get("platform")
+        if platform is None:
             await state.clear()
-            await message.answer("That account is gone. Tap <b>Follow accounts</b> again.")
+            await message.answer("That step expired. Tap <b>Follow accounts</b> again.")
             return
-        await self._preview(message, state, account, text)
+        await self._preview(message, state, platform, text)
 
-    async def _preview(self, message: Message, state: FSMContext, account: Account, text: str) -> None:
+    async def _preview(self, message: Message, state: FSMContext, platform: str, text: str) -> None:
         await state.set_state(FollowFlow.handles)  # so a retry after bad input is still handled
-        parsed = parse_handles(text, account.platform)
+        accounts = await self._usable(platform)
+        parsed = parse_handles(text, platform)
         if not parsed.handles:
             await message.answer("I couldn't find any valid handles in that. Try again.", reply_markup=_kb([[_cancel()]]))
             return
 
         limits = self.settings.limits
-        queued = await self.db.pending_count(account.id)
-        eta = estimate_seconds(queued + len(parsed.handles), limits.window_limit, limits.window_seconds,
+        daily = limits.daily_limit[platform]
+        # Accounts run side by side, so the slowest one (longest queue) sets the time.
+        longest, over_cap = 0, []
+        for account in accounts:
+            queued = await self.db.pending_count(account.id)
+            longest = max(longest, queued)
+            used_today = len(await self.db.action_times(account.id, time.time() - DAY))
+            if used_today + queued + len(parsed.handles) > daily:
+                over_cap.append(f"@{html.escape(account.username)} ({used_today}/{daily} used)")
+        eta = estimate_seconds(longest + len(parsed.handles), limits.window_limit, limits.window_seconds,
                                limits.gap_min, limits.gap_max)
-        used_today = len(await self.db.action_times(account.id, time.time() - DAY))
-        daily = limits.daily_limit[account.platform]
 
-        lines = [f"<b>{len(parsed.handles)}</b> to follow from {_label(account)}"]
+        n = len(accounts)
+        lines = [f"<b>{len(parsed.handles)}</b> to follow, from <b>{n} {PLATFORM_NAMES[platform]} "
+                 f"account{'s' if n != 1 else ''}</b> at the same time"]
         preview = ", ".join("@" + html.escape(h) for h in parsed.handles[:15])
         if len(parsed.handles) > 15:
             preview += f", … +{len(parsed.handles) - 15}"
@@ -414,11 +460,11 @@ class BotApp:
             lines.append(f"• {len(parsed.invalid)} invalid skipped: {shown}")
         if parsed.truncated:
             lines.append(f"• {parsed.truncated} over the {MAX_HANDLES_PER_JOB} limit dropped")
-        if queued:
-            lines.append(f"• {queued} already queued ahead of these")
-        lines.append(f"⏱ about {human_duration(eta)} (already-followed accounts go faster)")
-        if used_today + queued + len(parsed.handles) > daily:
-            lines.append(f"⚠️ Goes past today's cap ({used_today}/{daily} used). The rest waits for the cap to free up.")
+        if longest:
+            lines.append(f"• up to {longest} already queued ahead of these")
+        lines.append(f"⏱ about {human_duration(eta)} (each account keeps its own limits)")
+        if over_cap:
+            lines.append("⚠️ Goes past today's cap for " + ", ".join(over_cap) + ". The rest waits for the cap to free up.")
 
         await state.update_data(handles=parsed.handles)
         await state.set_state(FollowFlow.confirm)
@@ -435,13 +481,25 @@ class BotApp:
         if callback_data.value != "yes":
             await query.message.edit_text("Cancelled.")
             return
-        if not data.get("handles"):
+        accounts = await self._usable(data.get("platform"))
+        if not data.get("handles") or not data.get("platform"):
             # The preview's state lives in memory, so it is lost when the bot restarts.
             await query.message.edit_text("This preview has expired. Tap <b>Follow accounts</b> again.")
             return
-        job_id = await self.db.create_job(data["account_id"], query.message.chat.id, data["handles"])
-        await self.db.set_job_message(job_id, query.message.message_id)
-        await self._render_job(job_id, final=False)
+        if not accounts:
+            await query.message.edit_text("No usable accounts left on that platform.")
+            return
+        batch_id = None
+        now = time.time()
+        for i, account in enumerate(accounts):
+            job_id = await self.db.create_job(account.id, query.message.chat.id, data["handles"], batch_id)
+            batch_id = batch_id or job_id
+            await self.db.set_job_message(job_id, query.message.message_id)
+            if i:
+                # A few seconds apart, so several accounts don't hit the same profile in the same second.
+                start = now + STAGGER_SECONDS * i * random.uniform(0.6, 1.4)
+                await self.db.set_account_state(account.id, next_action_at=max(account.next_action_at, start))
+        await self._render_job(batch_id, final=False)
         self.worker.wake()
 
     # -- accounts / queue --
@@ -466,18 +524,34 @@ class BotApp:
         if not accounts:
             await message.answer("No accounts yet. Tap <b>Add account</b>.")
             return
+        if len({a.platform for a in accounts}) > 1:
+            await self._platform_picker(message, "aplat", "Which platform's accounts?", accounts)
+            return
+        await self._show_accounts(message, accounts)
+
+    async def on_accounts_platform(self, query: CallbackQuery, callback_data: Pick) -> None:
+        await query.answer()
+        accounts = await self.db.list_accounts(callback_data.value)
+        n = len(accounts)
+        await query.message.edit_text(f"<b>{PLATFORM_NAMES[callback_data.value]}</b>: {n} account{'s' if n != 1 else ''}")
+        await self._show_accounts(query.message, accounts)
+
+    async def _show_accounts(self, message: Message, accounts: list[Account]) -> None:
+        if not accounts:
+            await message.answer("No accounts on that platform. Tap <b>Add account</b>.")
+            return
         for account in accounts:
             toggle = (("Resume", "resume", "resume", ui.GREEN) if account.status != "active"
                       else ("Pause", "pause", "pause", None))
             await message.answer(
                 await self._account_line(account),
-                reply_markup=_kb([[(toggle[0], Pick(kind="acct", value=f"{toggle[1]}:{account.id}"), toggle[2], toggle[3]),
-                                   ("Remove", Pick(kind="acct", value=f"rm:{account.id}"), "clear", ui.RED)]]),
+                reply_markup=_kb([[(toggle[0], Pick(kind="acct", value=f"{toggle[1]}.{account.id}"), toggle[2], toggle[3]),
+                                   ("Remove", Pick(kind="acct", value=f"rm.{account.id}"), "clear", ui.RED)]]),
             )
 
     async def on_account_action(self, query: CallbackQuery, callback_data: Pick) -> None:
         await query.answer()
-        action, _, raw_id = callback_data.value.partition(":")
+        action, _, raw_id = callback_data.value.partition(".")
         account = await self.db.get_account(int(raw_id))
         if account is None:
             await query.message.edit_text("That account is already gone.")
@@ -493,7 +567,7 @@ class BotApp:
         elif action == "rm":
             await query.message.edit_text(
                 f"Remove {_label(account)}? Its stored cookies and queue are deleted.",
-                reply_markup=_kb([[("Yes, remove", Pick(kind="acct", value=f"rmyes:{account.id}"), "clear", ui.RED),
+                reply_markup=_kb([[("Yes, remove", Pick(kind="acct", value=f"rmyes.{account.id}"), "clear", ui.RED),
                                    ("Keep", Pick(kind="cancel", value="keep"), "cancel", None)]]),
             )
             return

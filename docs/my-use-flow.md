@@ -42,15 +42,16 @@ The bot keeps only the cookies for that site and ignores everything else in the 
 ### One account
 ```
 ➕ Follow accounts
-→ choose the account (if you've connected several)
+→ choose the platform: 📷 Instagram · 2 accounts / 💬 X · 1 account
 → send @someone (or a profile link)
 → preview → ✅ Start
 ```
+**Every connected account on that platform follows the list**, all at the same time. Each account keeps its own limits (14 per 10 minutes, random gaps, daily cap) and its own IP, and their first follows start a few seconds apart, so several accounts don't hit the same profile in the same second.
 Typing `/follow @a @b https://x.com/c` still works as a shortcut.
 It goes out within about a minute, unless that account has used up its budget.
 
 ### A list
-Tap **➕ Follow accounts**, choose the account, then send any mix of these, separated by spaces, commas, or new lines:
+Tap **➕ Follow accounts**, choose the platform, then send any mix of these, separated by spaces, commas, or new lines:
 ```
 @alice
 bob, https://x.com/carol
@@ -68,20 +69,20 @@ The preview shows:
 Press **✅ Start**. One message then updates live:
 
 ```
-🔄 Job #4 · X @me
-12/20 done
-✅ followed 9 · 🔒 requested 1 · ↩️ already 1 · ❓ not found 1
-⏳ 8 left
+🔄 Job #4 · Instagram · 2 accounts
+@first: 12/20 · ✅ followed 10 · ❓ not found 2
+@second: 11/20 · ✅ followed 9 · 🔒 requested 1 · ❓ not found 1
+⏳ 17 left
 ```
 
-When the job finishes, you get a separate message listing the accounts that were not found, unavailable, or failed.
+When every account is done, you get one message listing, per account, the accounts that were not found, unavailable, or failed.
 
 ## 3. Check on things
 
 | Button | Shows |
 |---|---|
 | **🗂 Queue** | Per account: what's queued, today's count against the cap, and when the next follow goes out |
-| **👥 My accounts** | Each account's status and VPN location, with **Pause/Resume** and **Remove** buttons |
+| **👥 My accounts** | Choose **Instagram** or **X**, then each of that platform's accounts with its status and VPN location, and **Pause/Resume** and **Remove** buttons |
 | **✋ Pause all** · **▶️ Resume all** | Pause or resume every account at once |
 | **🗑 Clear queue** | Cancel everything that hasn't been sent yet |
 | **❌ Cancel** (inside a step) | Leave the step you're in. Tapping any menu button also ends it |
