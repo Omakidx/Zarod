@@ -1,0 +1,10 @@
+{
+  "manifest_version": 3,
+  "name": "Zarod IG Request Capture",
+  "version": "1.1.1",
+  "description": "Records the shape of instagram.com POST requests (names only, no cookie or token values) so the follow bot can copy them.",
+  "permissions": ["webRequest", "storage"],
+  "host_permissions": ["*://*.instagram.com/*", "*://*.cdninstagram.com/*", "*://*.facebook.com/*"],
+  "background": { "service_worker": "background.js", "type": "module" },
+  "action": { "default_popup": "popup.html", "default_title": "IG Request Capture" }
+}

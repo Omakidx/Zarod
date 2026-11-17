@@ -1,0 +1,29 @@
+<!doctype html>
+<html>
+<head>
+<meta charset="utf-8">
+<style>
+  body { font: 13px system-ui, sans-serif; width: 340px; margin: 12px; color: #111; background: #fff; }
+  button { font: inherit; padding: 6px 10px; margin: 0 4px 6px 0; cursor: pointer; }
+  #start { background: #0a7; color: #fff; border: 0; border-radius: 4px; }
+  #copy { background: #06c; color: #fff; border: 0; border-radius: 4px; }
+  #status { margin: 6px 0; font-weight: 600; }
+  ol { padding-left: 18px; max-height: 260px; overflow: auto; }
+  li { margin-bottom: 4px; word-break: break-all; }
+  .hit { color: #a40; font-weight: 600; }
+  .note { color: #555; font-size: 12px; }
+</style>
+</head>
+<body>
+  <div>
+    <button id="start">▶ Start capture</button>
+    <button id="copy">📋 Copy report</button>
+    <button id="clear">Clear</button>
+  </div>
+  <div id="status"></div>
+  <ol id="list"></ol>
+  <p class="note">1. Open someone else's profile. 2. Start capture. 3. Click Follow. 4. Copy report right away (no need to wait) and paste it to Claude.
+  Cookie and token values are removed before anything is shown or copied.</p>
+  <script type="module" src="popup.js"></script>
+</body>
+</html>
