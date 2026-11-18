@@ -74,10 +74,16 @@ def menu_key(text: str | None) -> str:
 MENU_ACTIONS = {menu_key(label): action for action, label in LABELS.items()}
 
 
+# Plain emoji for the menu. Telegram Desktop stops sending messages in a chat whose reply keyboard has
+# coloured buttons with custom-emoji icons (mobile is fine), so the menu stays plain; inline buttons keep them.
+MENU_EMOJI = {"follow": "➕", "accounts": "👥", "queue": "🗂", "add": "🔗", "pause": "⏸", "resume": "▶️",
+              "clear": "🗑", "help": "❓"}
+
+
 def main_menu() -> ReplyKeyboardMarkup:
     return ReplyKeyboardMarkup(
         keyboard=[
-            [KeyboardButton(text=label, icon_custom_emoji_id=_icon(icon), style=style) for _, label, icon, style in row]
+            [KeyboardButton(text=f"{MENU_EMOJI[action]} {label}") for action, label, _, _ in row]
             for row in MENU_LAYOUT
         ],
         resize_keyboard=True,

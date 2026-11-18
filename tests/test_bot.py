@@ -6,7 +6,7 @@ from aiogram.fsm.context import FSMContext
 from aiogram.fsm.storage.base import StorageKey
 from aiogram.fsm.storage.memory import MemoryStorage
 
-from followbot.bot import BotApp, FollowFlow
+from followbot.bot import BotApp, FollowFlow, Pick
 
 from test_worker import env  # noqa: F401
 
@@ -58,7 +58,9 @@ def test_menu_matches_buttons_with_or_without_icons():
     labels = [b.text for row in keyboard for b in row]
     assert all(ui.menu_key(label) in ui.MENU_ACTIONS for label in labels)
     assert ui.MENU_ACTIONS[ui.menu_key("➕ Follow accounts")] == "follow"
-    assert keyboard[0][0].style == "success" and keyboard[0][0].icon_custom_emoji_id
+    # Plain buttons: Telegram Desktop stops sending in a chat whose reply keyboard has icons or colours.
+    assert all(b.icon_custom_emoji_id is None and b.style is None for row in keyboard for b in row)
+    assert keyboard[0][0].text == "➕ Follow accounts"
 
 
 async def test_icon_fallback_resends_without_icons():
@@ -70,17 +72,18 @@ async def test_icon_fallback_resends_without_icons():
     calls = []
 
     async def make_request(bot, method):
-        calls.append([b.icon_custom_emoji_id for row in method.reply_markup.keyboard for b in row])
+        calls.append([b.icon_custom_emoji_id for row in method.reply_markup.inline_keyboard for b in row])
         if len(calls) == 1:
             raise TelegramBadRequest(method=method, message="Bad Request: custom emoji not allowed")
         return "ok"
 
     ui.state.icons = True
     try:
-        method = SendMessage(chat_id=1, text="hi", reply_markup=ui.main_menu())
+        markup = ui.inline([[ui.button("Start", Pick(kind="confirm", value="yes"), icon="start")]])
+        method = SendMessage(chat_id=1, text="hi", reply_markup=markup)
         assert await ui.IconFallback()(make_request, None, method) == "ok"
         assert any(calls[0]) and not any(calls[1]) and ui.state.icons is False
-        assert not any(b.icon_custom_emoji_id for row in ui.main_menu().keyboard for b in row)
+        assert ui.button("Start", Pick(kind="confirm", value="yes"), icon="start").icon_custom_emoji_id is None
     finally:
         ui.state.icons = True
 

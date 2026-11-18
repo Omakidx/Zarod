@@ -3,14 +3,14 @@
 How you use the bot day to day once it's running. Every step happens inside Telegram, from the **menu buttons** under the message box (send `/start` once if you don't see them):
 
 ```
-[        ➕ Follow accounts        ]   (green)
+[        ➕ Follow accounts        ]
 [ 👥 My accounts ] [ 🗂 Queue      ]
 [         🔗 Add account          ]
-[ ✋ Pause all   ] [ ▶️ Resume all ]
-[ 🗑 Clear queue ] [ ❓ Help       ]   (Clear queue is red)
+[ ⏸ Pause all   ] [ ▶️ Resume all ]
+[ 🗑 Clear queue ] [ ❓ Help       ]
 ```
 
-The icons come from the *Telegram iOS Icons* custom-emoji pack. Telegram shows them only if the bot is allowed custom emoji (for example when your Telegram account has Premium). Otherwise the bot quietly drops the icons and the buttons work the same. The old `/commands` still work, but you don't need them.
+The menu uses plain emoji on purpose. With coloured buttons and custom-emoji icons in the menu, Telegram Desktop stopped sending messages in the chat (they hung with a clock icon) while the phone app was fine. The buttons inside messages (Start, Cancel, and so on) still use the *Telegram iOS Icons* pack; Telegram shows those only if the bot is allowed custom emoji, otherwise the bot drops them and they work the same. The old `/commands` still work, but you don't need them.
 
 ## 1. Connect an account (once per account, and again when cookies expire)
 
