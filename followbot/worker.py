@@ -195,6 +195,11 @@ class Worker:
         task = await self.db.next_task(account.id)
         if task is None:
             return
+        if task.handle.lower() == account.username.lower():
+            # An account can't follow itself; Instagram's lookup hides its own id, so this would only retry.
+            await self.db.finish_task(task.id, "cancelled", "this is the account itself")
+            await self._after_task(task.job_id)
+            return
         if await self.db.followed_before(account.id, task.handle):
             # Instagram's follow call answers "following" either way, so it can't tell us this itself.
             await self.db.finish_task(task.id, "already", "followed earlier by this bot")

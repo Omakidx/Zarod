@@ -492,6 +492,10 @@ class BotApp:
         lines.append(preview)
         if parsed.duplicates:
             lines.append(f"• {parsed.duplicates} duplicates removed")
+        own = [a.username for a in accounts if a.username.lower() in {h.lower() for h in parsed.handles}]
+        if own:
+            names = ", ".join("@" + html.escape(u) for u in own)
+            lines.append(f"• {names}: an account doesn't follow itself, skipped for it")
         if already:
             lines.append(f"• {len(already)} already queued, skipped")
         if parsed.wrong_platform:
@@ -540,7 +544,7 @@ class BotApp:
         now = time.time()
         for i, account in enumerate(accounts):
             queued = await self.db.pending_handles(account.id)
-            handles = [h for h in data["handles"] if h.lower() not in queued]
+            handles = [h for h in data["handles"] if h.lower() not in queued and h.lower() != account.username.lower()]
             if not handles:
                 continue
             job_id = await self.db.create_job(account.id, query.message.chat.id, handles, batch_id)

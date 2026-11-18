@@ -182,6 +182,15 @@ async def test_handle_followed_before_is_already_without_a_request(env):
     assert await db.job_counts(job) == {"already": 1, "followed": 1}
 
 
+async def test_own_handle_is_skipped_without_a_request(env):
+    db, worker, clock, notes, holder, acc = env
+    holder["adapter"] = FakeAdapter({})
+    job = await db.create_job(acc, 99, ["Me", "bob"])
+    await drain(worker, clock)
+    assert holder["adapter"].calls == ["bob"]
+    assert await db.job_counts(job) == {"cancelled": 1, "followed": 1}
+
+
 async def test_locations_one_ip_per_account(tmp_path):
     from dataclasses import replace
 

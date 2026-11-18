@@ -153,6 +153,18 @@ async def test_resending_a_queued_list_does_not_queue_it_twice(env):
     assert await db.pending_count(acc) == 3
 
 
+async def test_own_account_is_left_out_of_its_job(env):
+    db, worker, _, _, _, acc = env
+    app, state, msg = make_app(db, worker), fsm(), fake_message()
+    app._reported = set()
+    await app.cmd_follow(msg, state, CommandObject(prefix="/", command="follow", args="@me @bob"))
+    assert "@me: an account doesn't follow itself" in msg.answer.await_args.args[0]
+    query = SimpleNamespace(answer=AsyncMock(), message=SimpleNamespace(
+        chat=SimpleNamespace(id=1), message_id=77, edit_text=AsyncMock()))
+    await app.on_confirm(query, SimpleNamespace(value="yes"), state)
+    assert await db.pending_handles(acc) == {"bob"}
+
+
 async def test_job_card_says_when_the_next_follow_is_due(env):
     import time
 
