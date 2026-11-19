@@ -10,6 +10,5 @@ COPY followbot ./followbot
 
 RUN useradd --uid 10001 --create-home bot && mkdir -p /data && chown bot:bot /data
 USER bot
-VOLUME ["/data"]
 
 CMD ["python", "-m", "followbot"]
