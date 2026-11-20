@@ -8,8 +8,8 @@ set -eu
 SERVER_PUBKEY="${VPN_SERVER_PUBKEY:-9ef2f8mXHnAxx06lx4OxhtzASfJgv6YfEimuVyef6QE=}"
 # Same order as docker-compose.yml: main, ash2, ash3, ash4, ash5.
 ENDPOINT_IPS="${VPN_ENDPOINT_IPS:-45.144.115.26 45.144.115.34 37.19.206.34 149.102.227.103 185.156.46.102}"
-# wireproxy's default 1420 is too big for Railway's network: handshakes pass but full-size packets are dropped.
-MTU="${VPN_MTU:-1280}"
+# Railway drops tunnel packets above this: tested there, 1420 and 1280 lose every full-size reply, 1200 works.
+MTU="${VPN_MTU:-1200}"
 umask 077
 pids=""
 port=8881
