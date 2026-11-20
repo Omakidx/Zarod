@@ -10,7 +10,7 @@ One Railway project, two services from this repo. Both redeploy on every push to
 
 | Service | Build | Variables |
 |---|---|---|
-| `vpn` | `railway/vpn.Dockerfile` | `RAILWAY_DOCKERFILE_PATH`, `SURFSHARK_WG_PRIVATE_KEY`, `VPN_PROXY_PASSWORD` (optional: `VPN_ENDPOINT_IPS`, `VPN_SERVER_PUBKEY`) |
+| `vpn` | `railway/vpn.Dockerfile` | `RAILWAY_DOCKERFILE_PATH`, `SURFSHARK_WG_PRIVATE_KEY`, `VPN_PROXY_PASSWORD` (optional: `VPN_ENDPOINT_IPS`, `VPN_SERVER_PUBKEY`, `VPN_MTU`) |
 | `bot` | root `Dockerfile` | the ones below. Volume mounted at `/data` |
 
 `vpn` variables:
@@ -39,4 +39,5 @@ Notes:
 - `RAILWAY_RUN_UID=0` lets the bot write to the volume, which Railway mounts as root.
 - Railway rejects `VOLUME` in a Dockerfile, so the root `Dockerfile` has none. Compose mounts `./data` itself.
 - Keep `ENCRYPTION_KEY` with the database. A new key means reconnecting every account with `/connect`.
+- The tunnels use MTU 1200: at 1280 or more, Railway drops full-size replies and requests through the VPN time out (curl error 28).
 - Neither service needs a public domain. Run only one copy of the bot per Telegram token.
