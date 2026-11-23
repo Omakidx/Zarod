@@ -120,16 +120,24 @@ class BotApp:
         self.router.callback_query.filter(owner, F.message.chat.type == "private")
         self._register()
 
-    # ---- Notifier (used by the worker) ----
+    # ---- delivery target of the Outbox (which is the worker's notifier) ----
+    # These may raise (flood control included); the Outbox retries them.
 
     async def alert(self, text: str) -> None:
+        await self.send_alert(text)
+
+    async def send_alert(self, text: str) -> None:
         # Alerts carry platform error text; never let it be parsed as HTML.
         await self.bot.send_message(self.settings.owner_id, html.escape(text))
 
-    async def job_progress(self, job_id: int) -> None:
+    async def batch_of(self, job_id: int) -> int | None:
+        job = await self.db.get_job(job_id)
+        return job.batch_id if job else None
+
+    async def render_progress(self, job_id: int) -> None:
         await self._render_job(job_id, final=False)
 
-    async def job_finished(self, job_id: int) -> None:
+    async def report_finished(self, job_id: int) -> None:
         job = await self.db.get_job(job_id)
         if job is None:
             return
@@ -139,7 +147,6 @@ class BotApp:
             return
         if job.batch_id in self._reported:
             return
-        self._reported.add(job.batch_id)
         await self._render_job(job_id, final=True)
         totals: dict[str, int] = {}
         sections = []
@@ -164,6 +171,8 @@ class BotApp:
         if sections:
             lines += [""] + sections
         await self.bot.send_message(job.chat_id, "\n".join(lines))
+        # Only once it's sent: if Telegram refused it, the Outbox's retry must not find it "done".
+        self._reported.add(job.batch_id)
 
     async def _render_job(self, job_id: int, final: bool) -> None:
         """One live message per batch: a line per account."""

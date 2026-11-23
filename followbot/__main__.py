@@ -32,6 +32,7 @@ async def run_bot() -> None:
     from .importer import import_cookie_files
     from .ui import IconFallback
     from .config import PLATFORM_NAMES
+    from .outbox import Outbox
     from .worker import Worker, spread_locations
 
     settings = load_settings()
@@ -41,20 +42,10 @@ async def run_bot() -> None:
     bot = Bot(settings.bot_token, default=DefaultBotProperties(parse_mode=ParseMode.HTML))
     bot.session.middleware(IconFallback())
 
-    app: BotApp | None = None
-
-    class _Notifier:
-        async def job_progress(self, job_id: int) -> None:
-            await app.job_progress(job_id)
-
-        async def job_finished(self, job_id: int) -> None:
-            await app.job_finished(job_id)
-
-        async def alert(self, text: str) -> None:
-            await app.alert(text)
-
-    worker = Worker(db, vault, settings, _Notifier())
+    outbox = Outbox(None)  # its target, the bot app, needs the worker first
+    worker = Worker(db, vault, settings, outbox)
     app = BotApp(bot, db, vault, settings, worker)
+    outbox.target = app
     dp = Dispatcher(storage=MemoryStorage())
     dp.include_router(app.router)
 
@@ -70,11 +61,13 @@ async def run_bot() -> None:
     for account, location in await spread_locations(db, settings):
         await report(f"🌍 {PLATFORM_NAMES[account.platform]} @{account.username} now has its own IP: location {location}.")
     await import_cookie_files(settings, db, vault, worker, report)
+    outbox_task = asyncio.create_task(outbox.run(), name="outbox")
     worker_task = asyncio.create_task(worker.run(), name="follow-worker")
     try:
         await dp.start_polling(bot, allowed_updates=dp.resolve_used_update_types())
     finally:
         worker_task.cancel()
+        outbox_task.cancel()
         await worker.close()
         await db.close()
         await bot.session.close()

@@ -29,9 +29,11 @@ LOOKUP_GAP = (3.0, 8.0)  # pause after a task that only looked a user up
 
 
 class Notifier(Protocol):
+    """In production the Outbox: it only queues, so these return at once and don't raise."""
+
     async def job_progress(self, job_id: int) -> None: ...
     async def job_finished(self, job_id: int) -> None: ...
-    async def alert(self, text: str) -> None: ...
+    async def alert(self, text: str, *, group: str | None = None, who: str | None = None) -> None: ...
 
 
 def vault_context(platform: str, username: str) -> str:
@@ -163,7 +165,10 @@ class Worker:
         results = await asyncio.gather(*(self.process_one(a) for a in due), return_exceptions=True)
         for account, result in zip(due, results):
             if isinstance(result, BaseException):
-                log.error("follow for account %s failed: %s", account.id, type(result).__name__)
+                # The type alone hid what went wrong (an OperationalError said nothing). Database and
+                # Telegram messages carry no cookies; anything else still logs only its type.
+                said = f": {result}" if type(result).__module__.split(".")[0] in ("sqlite3", "aiogram") else ""
+                log.error("follow for account %s failed: %s%s", account.id, type(result).__name__, said)
         soonest = IDLE_POLL
         for account in accounts:
             account = await self.db.get_account(account.id)
@@ -213,23 +218,29 @@ class Worker:
             result = await adapter.follow(task.handle)
         except ProxyMissing as exc:
             await self.db.set_account_state(account.id, status="blocked", pause_reason=str(exc))
-            await self.notifier.alert(f"⛔ {name} paused: {exc}. Fix PROXIES, then tap Resume all.")
+            await self._alert(f"⛔ {name} paused: {exc}. Fix PROXIES, then tap Resume all.",
+                              group=f"⛔ Paused: {exc}. Fix PROXIES, then tap Resume all.", who=name)
             return
         except SessionExpired as exc:
             await self.forget(account.id)
             await self.db.set_account_state(account.id, status="expired", pause_reason=exc.detail)
-            await self.notifier.alert(f"🔑 {name}: {exc.detail}. Its queue is on hold. Tap Add account with fresh cookies.")
+            await self._alert(f"🔑 {name}: {exc.detail}. Its queue is on hold. Tap Add account with fresh cookies.",
+                              group=f"🔑 {exc.detail}. Their queues are on hold. Tap Add account with fresh cookies.",
+                              who=name)
             return
         except ActionBlocked as exc:
             await self.forget(account.id)
             await self.db.set_account_state(account.id, status="blocked", pause_reason=exc.detail)
-            await self.notifier.alert(f"⛔ {name}: {exc.detail} Then tap Resume all.")
+            await self._alert(f"⛔ {name}: {exc.detail} Then tap Resume all.",
+                              group=f"⛔ {exc.detail} Then tap Resume all.", who=name)
             return
         except RateLimited as exc:
             until = now + exc.retry_after
             await self.db.set_account_state(account.id, paused_until=until, pause_reason=exc.detail)
-            await self.notifier.alert(
-                f"⏸ {name}: {exc.detail}. Resuming automatically in about {human_duration(exc.retry_after)}."
+            await self._alert(
+                f"⏸ {name}: {exc.detail}. Resuming automatically in about {human_duration(exc.retry_after)}.",
+                group=f"⏸ {exc.detail}. Resuming automatically in about {human_duration(exc.retry_after)}.",
+                who=name,
             )
             return
         except Exception as exc:  # TransientError and anything unexpected
@@ -254,10 +265,18 @@ class Worker:
         await self._after_task(task.job_id)
 
     async def _after_task(self, job_id: int) -> None:
-        if await self.db.finish_job_if_complete(job_id):
-            await self.notifier.job_finished(job_id)
-        else:
-            await self.notifier.job_progress(job_id)
+        finished = await self.db.finish_job_if_complete(job_id)
+        await self._notify(self.notifier.job_finished if finished else self.notifier.job_progress, job_id)
+
+    async def _alert(self, text: str, *, group: str, who: str) -> None:
+        await self._notify(self.notifier.alert, text, group=group, who=who)
+
+    async def _notify(self, send, *args, **kwargs) -> None:
+        """A notification must never undo or interrupt a follow that already happened."""
+        try:
+            await send(*args, **kwargs)
+        except Exception as exc:
+            log.warning("notification failed: %s", type(exc).__name__)
 
 
 def human_duration(seconds: float) -> str:

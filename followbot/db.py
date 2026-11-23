@@ -105,6 +105,8 @@ class Database:
         conn.row_factory = aiosqlite.Row
         await conn.execute("PRAGMA foreign_keys = ON")
         await conn.execute("PRAGMA journal_mode = WAL")
+        # Wait for another connection's write (e.g. a backup or a console query) instead of failing at once.
+        await conn.execute("PRAGMA busy_timeout = 10000")
         await conn.executescript(SCHEMA)
         # Databases created before batches existed.
         columns = {r["name"] for r in await (await conn.execute("PRAGMA table_info(jobs)")).fetchall()}

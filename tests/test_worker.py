@@ -49,7 +49,7 @@ class Notes:
     async def job_finished(self, job_id):
         self.finished.append(job_id)
 
-    async def alert(self, text):
+    async def alert(self, text, *, group=None, who=None):
         self.alerts.append(text)
 
 

@@ -192,7 +192,7 @@ async def test_finished_report_is_a_summary_with_grouped_problems(env):
                                              ("not_found", "error route 201 chars")]):
         await db.finish_task(task, status, detail)
     await db.finish_job_if_complete(job)
-    await app.job_finished(job)
+    await app.report_finished(job)
     report = app.bot.send_message.await_args.args[1]
     assert "Job #%d finished" % job in report
     assert "✅ followed 1 · ↩️ already followed 1 · ❓ not found 2" in report
