@@ -1,3 +1,4 @@
+import dataclasses
 from types import SimpleNamespace
 from unittest.mock import AsyncMock
 
@@ -270,3 +271,88 @@ async def test_accounts_button_asks_platform_then_lists_it(env):
     await app.on_accounts_platform(query, SimpleNamespace(value="instagram"))
     cards = [c.args[0] for c in query.message.answer.await_args_list]
     assert len(cards) == 1 and "@gram" in cards[0]
+
+
+class _Adapter:
+    """Connect-flow stand-in: verify() returns the username in the cookies, or fails if there is none."""
+
+    def __init__(self, cookies):
+        self.cookies = cookies
+
+    async def verify(self):
+        from followbot.platforms import PlatformError
+
+        if "user" not in self.cookies:
+            raise PlatformError("Instagram logged this session out")
+        return self.cookies["user"]
+
+    def export_cookies(self):
+        return None
+
+    async def aclose(self):
+        pass
+
+
+def _paste(user=None):
+    import json
+
+    cookies = [{"name": "sessionid", "value": "s"}, {"name": "csrftoken", "value": "c"},
+               {"name": "ds_user_id", "value": "1"}]
+    if user:
+        cookies.append({"name": "user", "value": user})
+    msg = fake_message(json.dumps(cookies))
+    msg.delete = AsyncMock()
+    status = SimpleNamespace(edit_text=AsyncMock())
+    msg.answer = AsyncMock(return_value=status)
+    return msg, status
+
+
+async def test_more_accounts_can_be_pasted_without_pressing_add_account_again(env, monkeypatch):
+    from followbot import bot as botmod
+    from followbot.bot import ConnectFlow
+
+    db, worker, *_ = env
+    monkeypatch.setattr(botmod, "make_adapter", lambda platform, cookies, ua, proxy: _Adapter(cookies))
+    app, state = make_app(db, worker), fsm()
+    app.settings = dataclasses.replace(
+        worker.settings, proxies={"us": "http://vpn:8888", "us2": "http://vpn2:8888", "us3": "http://vpn3:8888"})
+    app.vault = worker.vault
+    await state.set_state(ConnectFlow.cookies)
+    await state.update_data(platform="instagram", location="us2")
+
+    first, status = _paste("alice")
+    await app.on_cookies(first, state)
+    assert "Connected Instagram as <b>@alice</b> via 🌍 us2" in status.edit_text.await_args.args[0]
+    assert "Paste another Instagram cookie export" in status.edit_text.await_args.args[0]
+    assert await state.get_state() == ConnectFlow.cookies.state
+    assert (await state.get_data())["location"] == "us3"  # the next account gets the next free IP
+
+    rejected, status = _paste()
+    await app.on_cookies(rejected, state)
+    assert "Nothing was saved" in status.edit_text.await_args.args[0]
+    assert await state.get_state() == ConnectFlow.cookies.state
+
+    bad = fake_message("not json")
+    bad.delete = AsyncMock()
+    await app.on_cookies(bad, state)
+    assert "try again" in bad.answer.await_args.args[0]
+    assert await state.get_state() == ConnectFlow.cookies.state
+
+    second, status = _paste("bob")
+    await app.on_cookies(second, state)
+    assert "@bob</b> via 🌍 us3" in status.edit_text.await_args.args[0]
+    assert sorted(a.username for a in await db.list_accounts("instagram")) == ["alice", "bob"]
+
+
+async def test_done_ends_the_add_account_step_and_keeps_the_result(env):
+    from followbot.bot import ConnectFlow
+
+    db, worker, *_ = env
+    app, state = make_app(db, worker), fsm()
+    await state.set_state(ConnectFlow.cookies)
+    message = SimpleNamespace(edit_reply_markup=AsyncMock(), edit_text=AsyncMock(), answer=AsyncMock())
+    query = SimpleNamespace(answer=AsyncMock(), message=message)
+    await app.on_cancel_button(query, Pick(kind="cancel", value="done"), state)
+    assert await state.get_state() is None
+    message.edit_text.assert_not_awaited()
+    assert message.edit_reply_markup.await_args.kwargs == {"reply_markup": None}

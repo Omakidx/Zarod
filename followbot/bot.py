@@ -76,6 +76,10 @@ def _cancel() -> tuple:
     return ("Cancel", Pick(kind="cancel", value="x"), "cancel", ui.RED)
 
 
+def _done() -> tuple:
+    return ("Done", Pick(kind="cancel", value="done"), "start", ui.GREEN)
+
+
 def _kb(rows: list[list[tuple]]) -> InlineKeyboardMarkup:
     """Rows of (text, callback data[, icon name[, style]]) tuples."""
     return ui.inline([[ui.button(*b) for b in row] for row in rows])
@@ -261,9 +265,14 @@ class BotApp:
         else:
             await self.cmd_start(message, state)
 
-    async def on_cancel_button(self, query: CallbackQuery, state: FSMContext) -> None:
+    async def on_cancel_button(self, query: CallbackQuery, callback_data: Pick, state: FSMContext) -> None:
         await query.answer()
         await state.clear()
+        if callback_data.value == "done":
+            # Keep the result it's attached to; only the buttons go.
+            await query.message.edit_reply_markup(reply_markup=None)
+            await query.message.answer("Done adding accounts.", reply_markup=ui.main_menu())
+            return
         await query.message.edit_text("Cancelled.")
 
     async def cmd_cancel(self, message: Message, state: FSMContext) -> None:
@@ -328,24 +337,28 @@ class BotApp:
             hint = ""
             if text and len(text) >= 4000:
                 hint = "\nThat looks like Telegram cut it off. Send it as a .json file instead."
-            await message.answer(f"❌ {html.escape(str(exc))}{hint}")
+            await message.answer(f"❌ {html.escape(str(exc))}{hint}\n{self._paste_more(platform)}",
+                                 reply_markup=_kb([[_done()]]))
             return
 
         status = await message.answer("Checking the session through the VPN…")
         try:
             adapter = make_adapter(platform, cookies, self.settings.user_agent_for(platform), proxy_url(self.settings, location))
         except ProxyMissing as exc:
-            await status.edit_text(f"❌ {html.escape(str(exc))}")
+            await status.edit_text(f"❌ {html.escape(str(exc))}\n{self._paste_more(platform)}",
+                                   reply_markup=_kb([[_done()]]))
             return
         try:
             username = await adapter.verify()
             cookies = adapter.export_cookies() or cookies
         except PlatformError as exc:
-            await status.edit_text(f"❌ {html.escape(exc.detail)}\nNothing was saved. Tap <b>Add account</b> to try again.")
+            await status.edit_text(f"❌ {html.escape(exc.detail)}\nNothing was saved. {self._paste_more(platform)}",
+                                   reply_markup=_kb([[_done()]]))
             return
         except Exception as exc:
             log.warning("session check failed: %s", type(exc).__name__)
-            await status.edit_text("❌ Couldn't check that session. Nothing was saved. Tap <b>Add account</b> to try again.")
+            await status.edit_text(f"❌ Couldn't check that session. Nothing was saved. {self._paste_more(platform)}",
+                                   reply_markup=_kb([[_done()]]))
             return
         finally:
             await adapter.aclose()
@@ -356,11 +369,23 @@ class BotApp:
         )
         await self.worker.forget(account_id)
         self.worker.wake()
-        await state.clear()
         saved = await self.db.get_account(account_id)
         location = saved.proxy_name if saved else location
         where = f" via 🌍 {html.escape(location)}" if location else ""
-        await status.edit_text(f"✅ Connected {PLATFORM_NAMES[platform]} as <b>@{html.escape(username)}</b>{where}.\nTap <b>Follow accounts</b> to start.")
+        # Stay on this step: the next paste is another account, on the next free location.
+        next_location = pick_location(self.settings, await self.db.list_accounts())
+        await state.update_data(location=next_location)
+        nxt = f" It gets 🌍 <b>{html.escape(next_location)}</b>." if next_location else ""
+        await status.edit_text(
+            f"✅ Connected {PLATFORM_NAMES[platform]} as <b>@{html.escape(username)}</b>{where}.\n\n"
+            f"Paste another {PLATFORM_NAMES[platform]} cookie export to add one more.{nxt} "
+            f"Tap <b>Done</b> when you're finished, then <b>Follow accounts</b> to start.",
+            reply_markup=_kb([[_done()]]),
+        )
+
+    @staticmethod
+    def _paste_more(platform: str) -> str:
+        return f"Paste another {PLATFORM_NAMES[platform]} cookie export to try again, or tap <b>Done</b>."
 
     async def _delete(self, message: Message) -> None:
         try:
