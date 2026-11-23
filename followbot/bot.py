@@ -35,8 +35,9 @@ COMMANDS = [BotCommand(command="start", description="Show the menu")]
 
 PLATFORM_ICONS = {"x": "x", "instagram": "instagram"}
 
-# Seconds between the first follows of the accounts in one batch (randomised ±40%).
-STAGGER_SECONDS = 8
+# Each account in a batch starts at a random moment within this many seconds, so many accounts
+# don't start (and then keep following) in lockstep.
+START_SPREAD_SECONDS = 600
 
 STATUS_ICONS = [
     ("followed", "✅ followed"),
@@ -581,12 +582,14 @@ class BotApp:
             handles = [h for h in data["handles"] if h.lower() not in queued and h.lower() != account.username.lower()]
             if not handles:
                 continue
+            # Every account works through the list in its own random order: many accounts following the
+            # same profiles in the same order at the same time is the pattern X locks accounts for.
+            handles = random.sample(handles, len(handles))
             job_id = await self.db.create_job(account.id, query.message.chat.id, handles, batch_id)
             batch_id = batch_id or job_id
             await self.db.set_job_message(job_id, query.message.message_id)
             if i:
-                # A few seconds apart, so several accounts don't hit the same profile in the same second.
-                start = now + STAGGER_SECONDS * i * random.uniform(0.6, 1.4)
+                start = now + random.uniform(0, START_SPREAD_SECONDS)
                 await self.db.set_account_state(account.id, next_action_at=max(account.next_action_at, start))
         if batch_id is None:
             await query.message.edit_text("All of these are already queued.")

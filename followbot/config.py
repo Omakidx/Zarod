@@ -24,8 +24,8 @@ class Limits:
     window_limit: int = 13
     window_seconds: int = 600
     daily_limit: dict[str, int] = field(default_factory=lambda: {"x": 200, "instagram": 100})
-    gap_min: float = 25.0
-    gap_max: float = 60.0
+    gap_min: float = 35.0
+    gap_max: float = 65.0
     max_attempts: int = 3
 
 
@@ -96,8 +96,8 @@ def load_settings(env: dict[str, str] | None = None) -> Settings:
             "x": _int(env, "DAILY_LIMIT_X", 200),
             "instagram": _int(env, "DAILY_LIMIT_INSTAGRAM", 100),
         },
-        gap_min=_float(env, "GAP_MIN_SECONDS", 25),
-        gap_max=_float(env, "GAP_MAX_SECONDS", 60),
+        gap_min=_float(env, "GAP_MIN_SECONDS", 35),
+        gap_max=_float(env, "GAP_MAX_SECONDS", 65),
     )
     if limits.gap_min > limits.gap_max:
         raise ConfigError("GAP_MIN_SECONDS must not exceed GAP_MAX_SECONDS")

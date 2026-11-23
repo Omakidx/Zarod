@@ -104,7 +104,7 @@ Both adapters send your cookies plus the CSRF header the website itself sends. T
 
 Before every follow, the worker computes the earliest allowed time. It's the latest of these four:
 
-- the end of the random 25–60 s gap after the previous follow;
+- the end of the random 35–65 s gap after the previous follow;
 - the moment the 10-minute window drops back under 13 follows;
 - the moment the rolling 24 h window drops back under the daily cap;
 - the end of any pause.

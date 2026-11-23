@@ -108,10 +108,40 @@ async def test_follow_uses_every_account_on_the_platform_in_one_batch(env):
     assert sorted(j.account_id for j in jobs) == sorted([(await db.list_accounts("x"))[0].id, second])
     assert {j.batch_id for j in jobs} == {jobs[0].id} and {j.message_id for j in jobs} == {77}
     assert [await db.job_counts(j.id) for j in jobs] == [{"pending": 2}, {"pending": 2}]
-    # The second account starts a few seconds after the first.
+    # The second account starts at a random moment in the first minutes, not with the first.
     assert (await db.get_account(second)).next_action_at > 0
     text = app.bot.edit_message_text.await_args.args[0]
     assert "X · 2 accounts" in text and "@me: 0/2" in text and "@two: 0/2" in text
+
+
+async def test_accounts_follow_the_list_in_their_own_order_and_start_spread_out(env):
+    import time
+
+    from followbot.bot import START_SPREAD_SECONDS
+
+    db, worker, *_ = env
+    others = [await add_x_account(db, worker, f"acc{n}") for n in range(5)]
+    app, state, msg = make_app(db, worker), fsm(), fake_message()
+    app._reported = set()
+    handles = " ".join(f"@target{n}" for n in range(30))
+    await app.cmd_follow(msg, state, CommandObject(prefix="/", command="follow", args=handles))
+    query = SimpleNamespace(answer=AsyncMock(), message=SimpleNamespace(
+        chat=SimpleNamespace(id=1), message_id=77, edit_text=AsyncMock()))
+    before = time.time()
+    await app.on_confirm(query, SimpleNamespace(value="yes"), state)
+
+    orders = set()
+    for account in await db.list_accounts("x"):
+        task, seen = await db.next_task(account.id), []
+        while task:
+            seen.append(task.handle)
+            await db.finish_task(task.id, "followed")
+            task = await db.next_task(account.id)
+        assert sorted(seen) == sorted(f"target{n}" for n in range(30))  # everyone still follows everything
+        orders.add(tuple(seen))
+    assert len(orders) == 6  # 30 handles: six identical shuffles would be astronomically unlikely
+    starts = [(await db.get_account(a)).next_action_at for a in others]
+    assert all(before <= t <= before + START_SPREAD_SECONDS + 1 for t in starts)
 
 
 async def test_paused_account_is_shown_on_preview_and_card_until_resumed(env):

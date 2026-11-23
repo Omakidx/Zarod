@@ -46,7 +46,7 @@ The bot keeps only the cookies for that site and ignores everything else in the 
 → send @someone (or a profile link)
 → preview → ✅ Start
 ```
-**Every connected account on that platform follows the list**, all at the same time. Each account keeps its own limits (13 per 10 minutes, random gaps, daily cap) and its own IP, and their first follows start a few seconds apart, so several accounts don't hit the same profile in the same second.
+**Every connected account on that platform follows the list**, all at the same time. Each account keeps its own limits (13 per 10 minutes, random gaps, daily cap) and its own IP, and each one goes through the list in its own random order, starting at a random moment in the first 10 minutes, so the accounts never move through the same profiles in lockstep.
 Typing `/follow @a @b https://x.com/c` still works as a shortcut.
 It goes out within about a minute, unless that account has used up its budget.
 
