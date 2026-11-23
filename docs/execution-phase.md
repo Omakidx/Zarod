@@ -130,7 +130,7 @@ Still on the **throwaway** accounts.
 2. Send `/follow` with **one** handle. It should be followed within about a minute.
 3. Send `/follow` with your mixed test list: public and private accounts, a handle that doesn't exist, a duplicate, and one link for the other platform. Check that the preview counts are right, then press Start.
 4. Send a **bulk list of about 20 handles.** Check:
-   - no more than 14 follows in any 10 minutes;
+   - no more than 13 follows in any 10 minutes;
    - the progress message updates;
    - the final report lists the not-found and private accounts.
 5. Try `/pause`, `/resume`, `/queue`, `/accounts`, and remove-then-reconnect.

@@ -49,7 +49,7 @@ There are no paid APIs, no browser automation (Playwright/Chrome), and no Redis 
 | `followbot/cookies.py` | Parses cookie-extension JSON: checks domains, expiry, and required names |
 | `followbot/handles.py` | Turns your input (handles, `@handles`, links) into clean, de-duplicated usernames |
 | `followbot/importer.py` | Imports cookie exports named in `X_COOKIES_FILE` / `INSTAGRAM_COOKIES_FILE` from `secrets/` at startup. Each file is re-imported only when its content changes |
-| `followbot/ratelimit.py` | The 14-per-10-minute window, the daily cap, random gaps, and the ETA estimate |
+| `followbot/ratelimit.py` | The 13-per-10-minute window, the daily cap, random gaps, and the ETA estimate |
 | `followbot/db.py` | SQLite tables: `accounts`, `jobs`, `tasks`, `actions` |
 | `followbot/worker.py` | Background loop: runs each account's queue within its budget and pauses or holds it on errors |
 | `followbot/bot.py` | Telegram commands, buttons, progress messages, and alerts |
@@ -105,7 +105,7 @@ Both adapters send your cookies plus the CSRF header the website itself sends. T
 Before every follow, the worker computes the earliest allowed time. It's the latest of these four:
 
 - the end of the random 25–60 s gap after the previous follow;
-- the moment the 10-minute window drops back under 14 follows;
+- the moment the 10-minute window drops back under 13 follows;
 - the moment the rolling 24 h window drops back under the daily cap;
 - the end of any pause.
 

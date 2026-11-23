@@ -21,7 +21,7 @@ class ConfigError(Exception):
 
 @dataclass(frozen=True)
 class Limits:
-    window_limit: int = 14
+    window_limit: int = 13
     window_seconds: int = 600
     daily_limit: dict[str, int] = field(default_factory=lambda: {"x": 200, "instagram": 100})
     gap_min: float = 25.0
@@ -90,7 +90,7 @@ def load_settings(env: dict[str, str] | None = None) -> Settings:
         raise ConfigError("ENCRYPTION_KEY must decode to 32 bytes (generate one with `python -m followbot keygen`)")
 
     limits = Limits(
-        window_limit=_int(env, "WINDOW_LIMIT", 14),
+        window_limit=_int(env, "WINDOW_LIMIT", 13),
         window_seconds=_int(env, "WINDOW_SECONDS", 600),
         daily_limit={
             "x": _int(env, "DAILY_LIMIT_X", 200),

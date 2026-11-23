@@ -46,7 +46,7 @@ The bot keeps only the cookies for that site and ignores everything else in the 
 → send @someone (or a profile link)
 → preview → ✅ Start
 ```
-**Every connected account on that platform follows the list**, all at the same time. Each account keeps its own limits (14 per 10 minutes, random gaps, daily cap) and its own IP, and their first follows start a few seconds apart, so several accounts don't hit the same profile in the same second.
+**Every connected account on that platform follows the list**, all at the same time. Each account keeps its own limits (13 per 10 minutes, random gaps, daily cap) and its own IP, and their first follows start a few seconds apart, so several accounts don't hit the same profile in the same second.
 Typing `/follow @a @b https://x.com/c` still works as a shortcut.
 It goes out within about a minute, unless that account has used up its budget.
 
@@ -63,7 +63,7 @@ The preview shows:
 - how many will be followed, plus the first 15 names;
 - duplicates removed, invalid entries, and links for the other platform;
 - how many are already queued ahead of this list;
-- **⏱ the ETA.** 14 follows take about 10 minutes, so 100 take about 70 minutes;
+- **⏱ the ETA.** 13 follows take about 10 minutes, so 100 take about 80 minutes;
 - ⚠️ a warning if the list goes past today's cap. The rest waits and runs once the cap frees up.
 
 Press **✅ Start**. One message then updates live:
