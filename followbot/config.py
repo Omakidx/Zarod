@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import base64
 import os
+import re
 from dataclasses import dataclass, field
 
 PLATFORMS = ("x", "instagram")
@@ -53,14 +54,32 @@ class Settings:
         return self.user_agents.get(platform) or self.user_agent
 
 
+_RANGE = re.compile(r"^([A-Za-z_]*?)(\d+)-\1(\d+)$")
+_PORT = re.compile(r"^(.*:)(\d+)(/?)$")
+
+
 def _parse_proxies(raw: str) -> dict[str, str]:
-    """`us=http://vpn-us:8888,de=http://vpn-de:8888` -> {"us": ..., "de": ...}."""
+    """`us=http://vpn-us:8888,de=http://vpn-de:8888` -> {"us": ..., "de": ...}.
+
+    A range `ash6-ash20=http://host:8886` stands for ash6 on port 8886, ash7 on 8887, … ash20 on 8900
+    (one tunnel per port in the vpn service).
+    """
     proxies: dict[str, str] = {}
     for part in filter(None, (p.strip() for p in raw.split(","))):
         name, sep, url = part.partition("=")
-        if not sep or not name.strip() or not url.strip():
+        name, url = name.strip(), url.strip()
+        if not sep or not name or not url:
             raise ConfigError(f"PROXIES entry must look like name=url, got {part!r}")
-        proxies[name.strip()] = url.strip()
+        span = _RANGE.match(name)
+        if span:
+            prefix, first, last = span.group(1), int(span.group(2)), int(span.group(3))
+            port = _PORT.match(url)
+            if last < first or not port:
+                raise ConfigError(f"PROXIES range must look like ash6-ash20=http://host:8886, got {part!r}")
+            for i in range(first, last + 1):
+                proxies[f"{prefix}{i}"] = f"{port.group(1)}{int(port.group(2)) + i - first}{port.group(3)}"
+        else:
+            proxies[name] = url
     return proxies
 
 
@@ -109,7 +128,8 @@ def load_settings(env: dict[str, str] | None = None) -> Settings:
     if limits.gap_min > limits.gap_max:
         raise ConfigError("GAP_MIN_SECONDS must not exceed GAP_MAX_SECONDS")
 
-    proxies = _parse_proxies(env.get("PROXIES", ""))
+    # PROXIES_EXTRA adds locations without touching PROXIES (handy for a range of new tunnels).
+    proxies = {**_parse_proxies(env.get("PROXIES", "")), **_parse_proxies(env.get("PROXIES_EXTRA", ""))}
     require_proxy = env.get("REQUIRE_PROXY", "true").strip().lower() not in ("0", "false", "no")
     if require_proxy and not proxies:
         raise ConfigError("REQUIRE_PROXY is on but PROXIES is empty")

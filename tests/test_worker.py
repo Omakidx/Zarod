@@ -339,3 +339,29 @@ async def test_locations_one_ip_per_account(tmp_path):
         assert [(a.username, loc) for a, loc in moves] == [("c", "main")]
     finally:
         await db.close()
+
+
+async def test_accounts_are_spread_evenly_over_new_locations(tmp_path):
+    from collections import Counter
+
+    from followbot.worker import spread_locations
+
+    db = await Database.open(str(tmp_path / "spread.db"))
+    five = {n: f"http://vpn:{8881 + i}" for i, n in enumerate(["main", "ash2", "ash3", "ash4", "ash5"])}
+    twenty = {**five, **{f"ash{i}": f"http://vpn:{8880 + i}" for i in range(6, 21)}}
+    settings = Settings(bot_token="t", owner_id=1, encryption_key=b"0" * 32, db_path="", require_proxy=True,
+                        user_agent="ua", proxies=twenty, limits=Limits())
+    try:
+        names = list(five)
+        for i in range(50):  # 50 X and 30 Instagram accounts piled on the first five locations
+            await db.upsert_account("x", f"x{i}", "c", "ua", names[i % 5])
+        for i in range(30):
+            await db.upsert_account("instagram", f"ig{i}", "c", "ua", names[i % 5])
+        moves = await spread_locations(db, settings)
+        accounts = await db.list_accounts()
+        assert max(Counter(a.proxy_name for a in accounts).values()) == 4  # 80 over 20
+        assert max(Counter(a.proxy_name for a in accounts if a.platform == "x").values()) <= 3  # 50 X over 20
+        assert len(moves) == 60 and all(loc.startswith("ash") for _, loc in moves)
+        assert await spread_locations(db, settings) == []  # stable: nothing moves on the next start
+    finally:
+        await db.close()

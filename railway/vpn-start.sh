@@ -6,10 +6,15 @@ set -eu
 : "${VPN_PROXY_PASSWORD:?set VPN_PROXY_PASSWORD (the bot uses it in PROXIES)}"
 # us-ash.prod.surfshark.com: one public key for all its IPs (from gluetun v3.40.0's server list).
 SERVER_PUBKEY="${VPN_SERVER_PUBKEY:-9ef2f8mXHnAxx06lx4OxhtzASfJgv6YfEimuVyef6QE=}"
-# Same order as docker-compose.yml: main, ash2, ash3, ash4, ash5.
-# ash3 was 37.19.206.34 until Surfshark retired it (Nov 2026: no reply at all); `dig us-ash.prod.surfshark.com`
-# lists the current ones.
-ENDPOINT_IPS="${VPN_ENDPOINT_IPS:-45.144.115.26 45.144.115.34 151.240.254.12 149.102.227.103 185.156.46.102}"
+# Location order: main, ash2 … ash20 (ports 8881 … 8900); the bot's PROXIES + PROXIES_EXTRA must match.
+# Keep existing entries in place (an account keeps its location, so its IP). ash3 was 37.19.206.34 until
+# Surfshark retired it (Nov 2026: no reply at all). `dig us-ash.prod.surfshark.com` rotates through the
+# current servers (65+ seen); each one gives its own exit IP (the server address + 1). ash6-ash20 were
+# tested from this service before being added.
+ENDPOINT_IPS="${VPN_ENDPOINT_IPS:-45.144.115.26 45.144.115.34 151.240.254.12 149.102.227.103 185.156.46.102 \
+37.19.206.39 37.19.220.194 45.144.115.3 45.144.115.138 45.144.115.217 \
+149.102.227.98 149.102.227.113 151.240.254.5 151.240.254.25 151.240.254.45 \
+185.156.46.97 185.156.46.117 37.19.206.46 37.19.220.199 45.144.115.195}"
 # Railway drops tunnel packets above this: tested there, 1420 and 1280 lose every full-size reply, 1200 works.
 MTU="${VPN_MTU:-1200}"
 umask 077

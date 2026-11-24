@@ -10,6 +10,7 @@ from __future__ import annotations
 
 import argparse
 import asyncio
+from collections import Counter
 import logging
 import os
 import sys
@@ -59,8 +60,13 @@ async def run_bot() -> None:
             log.warning("couldn't message the owner: %s", type(exc).__name__)
 
     await worker.remove_blocked_leftovers()  # before spreading, so their locations are free again
-    for account, location in await spread_locations(db, settings):
-        await report(f"🌍 {PLATFORM_NAMES[account.platform]} @{account.username} now has its own IP: location {location}.")
+    moves = await spread_locations(db, settings)
+    if moves:
+        # Worker adapters are built after this, so moved accounts start on their new IP.
+        per_ip = max(Counter(a.proxy_name for a in await db.list_accounts()).values())
+        names = ", ".join(f"@{a.username}→{loc}" for a, loc in moves[:20]) + (f", … +{len(moves) - 20}" if len(moves) > 20 else "")
+        await report(f"🌍 Spread accounts over {len(settings.proxies)} VPN locations: moved {len(moves)} "
+                     f"({names}). Now at most {per_ip} accounts share an IP.")
     await import_cookie_files(settings, db, vault, worker, report)
     outbox_task = asyncio.create_task(outbox.run(), name="outbox")
     worker_task = asyncio.create_task(worker.run(), name="follow-worker")

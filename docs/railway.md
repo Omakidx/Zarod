@@ -3,7 +3,7 @@
 Railway can't run gluetun (it needs `NET_ADMIN` and `/dev/net/tun`), so there the VPN is a
 userspace WireGuard service (`railway/vpn.Dockerfile`, [wireproxy](https://github.com/windtf/wireproxy)).
 It opens one tunnel per pinned Surfshark Ashburn IP, in the same order as `docker-compose.yml`,
-each as an HTTP proxy on its own port (8881 to 8885). The bot still sends only X/Instagram traffic
+each as an HTTP proxy on its own port (8881 to 8900: main, ash2 … ash20). The bot still sends only X/Instagram traffic
 through them. A tunnel only connects when traffic first goes through it.
 
 One Railway project, two services from this repo. Both redeploy on every push to `main`.
@@ -30,6 +30,7 @@ from `.env.example` (the rate limits are optional and default to the values show
 
 ```
 PROXIES=main=http://bot:${{vpn.VPN_PROXY_PASSWORD}}@vpn.railway.internal:8881,ash2=http://bot:${{vpn.VPN_PROXY_PASSWORD}}@vpn.railway.internal:8882,ash3=http://bot:${{vpn.VPN_PROXY_PASSWORD}}@vpn.railway.internal:8883,ash4=http://bot:${{vpn.VPN_PROXY_PASSWORD}}@vpn.railway.internal:8884,ash5=http://bot:${{vpn.VPN_PROXY_PASSWORD}}@vpn.railway.internal:8885
+PROXIES_EXTRA=ash6-ash20=http://bot:${{vpn.VPN_PROXY_PASSWORD}}@vpn.railway.internal:8886
 REQUIRE_PROXY=true
 DB_PATH=/data/followbot.db
 RAILWAY_RUN_UID=0
@@ -42,5 +43,6 @@ Notes:
 - Railway rejects `VOLUME` in a Dockerfile, so the root `Dockerfile` has none. Compose mounts `./data` itself.
 - Keep `ENCRYPTION_KEY` with the database. A new key means reconnecting every account with `/connect`.
 - The tunnels use MTU 1200: at 1280 or more, Railway drops full-size replies and requests through the VPN time out (curl error 28).
+- 20 locations (one Surfshark Ashburn server each, so 20 exit IPs). `PROXIES_EXTRA` uses the range form `ash6-ash20=…:8886` (ash6 on 8886 … ash20 on 8900). On start, the bot spreads accounts evenly over all locations, per platform first, and reports how many it moved.
 - Surfshark retires server IPs now and then; a retired one gives no reply at all (ReadTimeout). `dig +short us-ash.prod.surfshark.com` lists current ones: put a replacement in `railway/vpn-start.sh` (or set `VPN_ENDPOINT_IPS`, five space-separated IPs in location order) and keep the location name, so its accounts keep a stable location. ash3 moved from 37.19.206.34 to 151.240.254.12 in Nov 2026.
 - Neither service needs a public domain. Run only one copy of the bot per Telegram token.

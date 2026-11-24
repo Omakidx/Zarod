@@ -147,3 +147,16 @@ def test_per_platform_user_agent():
            "PROXIES": "main=http://vpn:8888", "BROWSER_USER_AGENT": "Firefox UA", "INSTAGRAM_USER_AGENT": "Brave UA"}
     s = load_settings(env)
     assert s.user_agent_for("instagram") == "Brave UA" and s.user_agent_for("x") == "Firefox UA"
+
+
+def test_proxies_range_and_extra():
+    from followbot.config import _parse_proxies, load_settings
+
+    got = _parse_proxies("main=http://bot:pw@vpn:8881,ash6-ash8=http://bot:pw@vpn:8886")
+    assert got == {"main": "http://bot:pw@vpn:8881", "ash6": "http://bot:pw@vpn:8886",
+                   "ash7": "http://bot:pw@vpn:8887", "ash8": "http://bot:pw@vpn:8888"}
+    env = {"TELEGRAM_BOT_TOKEN": "t", "OWNER_TELEGRAM_ID": "1", "ENCRYPTION_KEY": "A" * 43 + "=",
+           "PROXIES": "main=http://vpn:8881", "PROXIES_EXTRA": "ash6-ash20=http://vpn:8886"}
+    settings = load_settings(env)
+    assert list(settings.proxies)[:2] == ["main", "ash6"] and len(settings.proxies) == 16
+    assert settings.proxies["ash20"] == "http://vpn:8900"
