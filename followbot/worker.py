@@ -21,7 +21,7 @@ from .platforms import (
     TransientError,
     make_adapter,
 )
-from .ratelimit import DAY, next_allowed_at, random_gap
+from .ratelimit import DAY, HOUR, next_allowed_at, random_gap, warmup_caps
 
 log = logging.getLogger(__name__)
 
@@ -36,6 +36,13 @@ class Notifier(Protocol):
     async def job_progress(self, job_id: int) -> None: ...
     async def job_finished(self, job_id: int) -> None: ...
     async def alert(self, text: str, *, group: str | None = None, who: str | None = None) -> None: ...
+
+
+def account_caps(settings: Settings, account: Account, now: float) -> tuple[int, int | None]:
+    """This account's (daily cap, hourly cap or None), with warm-up for recently added accounts."""
+    limits = settings.limits
+    return warmup_caps(limits.daily_limit[account.platform], limits.warmup_start.get(account.platform, 0),
+                       now - account.created_at)
 
 
 def vault_context(platform: str, username: str) -> str:
@@ -151,12 +158,14 @@ class Worker:
             return float("inf")
         now = self.clock()
         limits = self.settings.limits
+        daily, hourly = account_caps(self.settings, account, now)
         return next_allowed_at(
             await self.db.action_times(account.id, now - DAY),
             now,
             window_limit=limits.window_limit,
             window_seconds=limits.window_seconds,
-            daily_limit=limits.daily_limit[account.platform],
+            daily_limit=daily,
+            hourly_limit=hourly,
             not_before=max(account.next_action_at, account.paused_until),
         )
 
@@ -275,6 +284,10 @@ class Worker:
         if result.action_sent:
             await self.db.record_action(account.id, now)
             gap = random_gap(self.settings.limits.gap_min, self.settings.limits.gap_max, self.rng)
+            _, hourly = account_caps(self.settings, account, now)
+            if hourly:
+                # Warming up: spread the hour's follows over the hour instead of bunching them.
+                gap = max(gap, self.rng.uniform(0.7, 1.3) * HOUR / hourly)
         else:
             gap = self.rng.uniform(*LOOKUP_GAP)
         next_at = now + gap

@@ -27,6 +27,9 @@ class Limits:
     gap_min: float = 35.0
     gap_max: float = 65.0
     max_attempts: int = 3
+    # Warm-up: an account's daily cap on its first day in the bot, doubling each day up to
+    # daily_limit. 0 turns it off. X locked brand-new accounts after ~35 follows in their first hour.
+    warmup_start: dict[str, int] = field(default_factory=lambda: {"x": 20, "instagram": 0})
 
 
 @dataclass(frozen=True)
@@ -98,6 +101,10 @@ def load_settings(env: dict[str, str] | None = None) -> Settings:
         },
         gap_min=_float(env, "GAP_MIN_SECONDS", 35),
         gap_max=_float(env, "GAP_MAX_SECONDS", 65),
+        warmup_start={
+            "x": _int(env, "WARMUP_START_X", 20),
+            "instagram": _int(env, "WARMUP_START_INSTAGRAM", 0),
+        },
     )
     if limits.gap_min > limits.gap_max:
         raise ConfigError("GAP_MIN_SECONDS must not exceed GAP_MAX_SECONDS")

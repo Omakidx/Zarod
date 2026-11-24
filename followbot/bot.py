@@ -23,7 +23,7 @@ from .db import Account, Database
 from .handles import MAX_HANDLES_PER_JOB, parse_handles
 from .platforms import NetworkError, PlatformError, make_adapter
 from .ratelimit import DAY, estimate_seconds
-from .worker import ProxyMissing, Worker, human_duration, pick_location, proxy_url, vault_context
+from .worker import ProxyMissing, Worker, account_caps, human_duration, pick_location, proxy_url, vault_context
 
 log = logging.getLogger(__name__)
 
@@ -530,12 +530,13 @@ class BotApp:
             return
 
         limits = self.settings.limits
-        daily = limits.daily_limit[platform]
         # Accounts run side by side, so the slowest one (longest queue) sets the time.
-        longest, over_cap = 0, []
+        longest, over_cap, warming = 0, [], 0
         for account in accounts:
             queued = await self.db.pending_count(account.id)
             longest = max(longest, queued)
+            daily, hourly = account_caps(self.settings, account, time.time())
+            warming += hourly is not None
             used_today = len(await self.db.action_times(account.id, time.time() - DAY))
             if used_today + queued + len(parsed.handles) > daily:
                 over_cap.append(f"@{html.escape(account.username)} ({used_today}/{daily} used)")
@@ -567,6 +568,9 @@ class BotApp:
         if longest:
             lines.append(f"• up to {longest} already queued ahead of these")
         lines.append(f"⏱ about {human_duration(eta)} (each account keeps its own limits)")
+        if warming:
+            lines.append(f"🌱 {warming} recently added account{'s are' if warming != 1 else ' is'} still warming up "
+                         "(smaller daily cap, doubling each day), so these take longer.")
         held = [a for a in accounts if a.status == "paused"]
         if held:
             names = ", ".join(f"@{html.escape(a.username)}" for a in held)
@@ -632,8 +636,9 @@ class BotApp:
         if account.status == "active" and account.paused_until > now:
             state = f"⏸ cooling down {human_duration(account.paused_until - now)}"
         where = f" · 🌍 {html.escape(account.proxy_name)}" if account.proxy_name else ""
-        line = (f"<b>{_label(account)}</b>{where}\n{state} · today {used}/"
-                f"{self.settings.limits.daily_limit[account.platform]} · queued {queued}")
+        daily, hourly = account_caps(self.settings, account, now)
+        warm = f" 🌱 warming up, day {int((now - account.created_at) // DAY) + 1}" if hourly else ""
+        line = (f"<b>{_label(account)}</b>{where}\n{state} · today {used}/{daily}{warm} · queued {queued}")
         if account.pause_reason and (account.status != "active" or account.paused_until > now):
             line += f"\n<i>{html.escape(account.pause_reason or '')}</i>"
         return line

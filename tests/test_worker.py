@@ -179,6 +179,44 @@ async def test_the_platforms_own_window_is_waited_out_before_it_refuses(env):
     assert notes.alerts == []  # a planned wait, not a problem
 
 
+async def test_a_new_x_account_warms_up_slowly(env):
+    import dataclasses
+
+    db, worker, clock, notes, holder, acc = env
+    worker.settings = dataclasses.replace(worker.settings, limits=dataclasses.replace(
+        worker.settings.limits, window_limit=13, daily_limit={"x": 200, "instagram": 200},
+        warmup_start={"x": 20, "instagram": 0}))
+    await db.conn.execute("UPDATE accounts SET created_at = ? WHERE id = ?", (clock.t - 600, acc))
+    await db.conn.commit()
+    holder["adapter"] = FakeAdapter({})
+    await db.create_job(acc, 99, [f"u{i}" for i in range(40)])
+    start = clock.t
+    for _ in range(200):
+        delay = await worker.tick()
+        clock.t += delay
+        if clock.t - start > 6 * 3600:
+            break
+    sent = await db.action_times(acc, start - 1)
+    assert len(sent) <= 3 * 7  # at most 3 an hour on its first day
+    gaps = [b - a for a, b in zip(sorted(sent), sorted(sent)[1:])]
+    assert min(gaps) >= 0.7 * 3600 / 3  # spread out, never a burst
+
+
+async def test_an_established_account_is_not_slowed(env):
+    import dataclasses
+
+    db, worker, clock, notes, holder, acc = env
+    worker.settings = dataclasses.replace(worker.settings, limits=dataclasses.replace(
+        worker.settings.limits, warmup_start={"x": 20, "instagram": 0}))
+    await db.conn.execute("UPDATE accounts SET created_at = ? WHERE id = ?", (clock.t - 30 * 86400, acc))
+    await db.conn.commit()
+    holder["adapter"] = FakeAdapter({})
+    job = await db.create_job(acc, 99, ["a", "b"])
+    await drain(worker, clock)
+    assert await db.job_counts(job) == {"followed": 2}
+    assert clock.t - 1_000_000 < 120
+
+
 async def test_rotated_cookies_are_persisted_encrypted(env):
     db, worker, clock, notes, holder, acc = env
     adapter = FakeAdapter({})

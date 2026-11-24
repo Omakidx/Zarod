@@ -70,6 +70,7 @@ class Account:
     paused_until: float
     pause_reason: str | None
     next_action_at: float
+    created_at: float = 0.0  # when it was added to the bot; warm-up counts from here
 
 
 @dataclass
@@ -372,4 +373,5 @@ def _account(row: aiosqlite.Row) -> Account:
         paused_until=row["paused_until"],
         pause_reason=row["pause_reason"],
         next_action_at=row["next_action_at"],
+        created_at=row["created_at"],
     )

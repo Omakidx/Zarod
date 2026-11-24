@@ -72,6 +72,21 @@ class TestHandles:
         assert len(r.handles) == MAX_HANDLES_PER_JOB and r.truncated == 5
 
 
+class TestWarmup:
+    def test_new_accounts_start_small_and_double_each_day(self):
+        from followbot.ratelimit import DAY, warmup_caps
+
+        caps = [warmup_caps(200, 20, d * DAY + 60) for d in range(6)]
+        assert [c[0] for c in caps] == [20, 40, 80, 160, 200, 200]
+        assert caps[0][1] == 3 and caps[1][1] == 5  # the day's follows spread over ~8 hours
+        assert caps[4][1] is None  # fully warmed up: only the normal limits
+        assert warmup_caps(200, 0, 60) == (200, None)  # warm-up off
+
+    def test_hourly_cap(self):
+        assert next_allowed_at([100, 200, 300], 1000, window_limit=13, window_seconds=600, daily_limit=20,
+                               hourly_limit=3) == 100 + 3600
+
+
 class TestRateLimit:
     kw = dict(window_limit=3, window_seconds=600, daily_limit=10)
 
