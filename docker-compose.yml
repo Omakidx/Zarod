@@ -46,7 +46,7 @@ services:
     <<: *vpn
     environment:
       <<: *vpn-env
-      VPN_ENDPOINT_IP: ${VPN_ENDPOINT_IP_3:-37.19.206.34}
+      VPN_ENDPOINT_IP: ${VPN_ENDPOINT_IP_3:-151.240.254.12}
 
   vpn4:
     <<: *vpn

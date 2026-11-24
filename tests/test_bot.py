@@ -374,6 +374,47 @@ async def test_more_accounts_can_be_pasted_without_pressing_add_account_again(en
     assert sorted(a.username for a in await db.list_accounts("instagram")) == ["alice", "bob"]
 
 
+async def test_a_location_that_doesnt_answer_falls_back_to_another(env, monkeypatch):
+    from followbot import bot as botmod
+    from followbot.bot import ConnectFlow
+    from followbot.platforms import NetworkError
+
+    db, worker, *_ = env
+    dead = "http://vpn3:8888"
+
+    class Adapter(_Adapter):
+        def __init__(self, cookies, proxy):
+            super().__init__(cookies)
+            self.proxy = proxy
+
+        async def verify(self):
+            if self.proxy == dead:
+                raise NetworkError("Network error (ReadTimeout)")
+            return await super().verify()
+
+    monkeypatch.setattr(botmod, "make_adapter", lambda platform, cookies, ua, proxy: Adapter(cookies, proxy))
+    app, state = make_app(db, worker), fsm()
+    app.settings = dataclasses.replace(
+        worker.settings, proxies={"us": "http://vpn:8888", "us2": "http://vpn2:8888", "us3": dead})
+    app.vault = worker.vault
+    await state.set_state(ConnectFlow.cookies)
+    await state.update_data(platform="instagram", location="us3")
+
+    msg, status = _paste("carol")
+    await app.on_cookies(msg, state)
+    assert "Connected Instagram as <b>@carol</b> via 🌍 us2" in status.edit_text.await_args.args[0]
+    assert (await db.list_accounts("instagram"))[0].proxy_name == "us2"
+
+    # Every location dead: a clear message, nothing saved.
+    app.settings = dataclasses.replace(app.settings, proxies={"us3": dead})
+    await state.update_data(location="us3")
+    msg, status = _paste("dave")
+    await app.on_cookies(msg, state)
+    text = status.edit_text.await_args.args[0]
+    assert "VPN isn't answering" in text and "us3" in text and "nothing was saved" in text
+    assert [a.username for a in await db.list_accounts("instagram")] == ["carol"]
+
+
 async def test_done_ends_the_add_account_step_and_keeps_the_result(env):
     from followbot.bot import ConnectFlow
 

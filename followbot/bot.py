@@ -21,7 +21,7 @@ from .cookies import CookieError, parse_cookie_export
 from .crypto import CookieVault
 from .db import Account, Database
 from .handles import MAX_HANDLES_PER_JOB, parse_handles
-from .platforms import PlatformError, make_adapter
+from .platforms import NetworkError, PlatformError, make_adapter
 from .ratelimit import DAY, estimate_seconds
 from .worker import ProxyMissing, Worker, human_duration, pick_location, proxy_url, vault_context
 
@@ -357,26 +357,45 @@ class BotApp:
             return
 
         status = await message.answer("Checking the session through the VPN…")
-        try:
-            adapter = make_adapter(platform, cookies, self.settings.user_agent_for(platform), proxy_url(self.settings, location))
-        except ProxyMissing as exc:
-            await status.edit_text(f"❌ {html.escape(str(exc))}\n{self._paste_more(platform)}",
-                                   reply_markup=_kb([[_done()]]))
-            return
-        try:
-            username = await adapter.verify()
-            cookies = adapter.export_cookies() or cookies
-        except PlatformError as exc:
-            await status.edit_text(f"❌ {html.escape(exc.detail)}\nNothing was saved. {self._paste_more(platform)}",
-                                   reply_markup=_kb([[_done()]]))
-            return
-        except Exception as exc:
-            log.warning("session check failed: %s", type(exc).__name__)
-            await status.edit_text(f"❌ Couldn't check that session. Nothing was saved. {self._paste_more(platform)}",
-                                   reply_markup=_kb([[_done()]]))
-            return
-        finally:
-            await adapter.aclose()
+        # If the location doesn't answer, try the others before giving up: a dead VPN server must not
+        # make every new account fail.
+        tried: list[str] = []
+        while True:
+            try:
+                adapter = make_adapter(platform, cookies, self.settings.user_agent_for(platform),
+                                       proxy_url(self.settings, location))
+            except ProxyMissing as exc:
+                await status.edit_text(f"❌ {html.escape(str(exc))}\n{self._paste_more(platform)}",
+                                       reply_markup=_kb([[_done()]]))
+                return
+            try:
+                username = await adapter.verify()
+                cookies = adapter.export_cookies() or cookies
+                break
+            except NetworkError as exc:
+                log.warning("session check: location %s didn't answer", location)
+                tried.append(location or "direct")
+                fallback = pick_location(self.settings, await self.db.list_accounts(), exclude=tried) if location else None
+                if fallback is None:
+                    await status.edit_text(
+                        f"❌ {html.escape(exc.detail)} through 🌍 {html.escape(', '.join(tried))}. "
+                        f"The VPN isn't answering, so nothing was saved. {self._paste_more(platform)}",
+                        reply_markup=_kb([[_done()]]))
+                    return
+                location = fallback
+                await status.edit_text(f"🌍 {html.escape(tried[-1])} didn't answer. Trying 🌍 "
+                                       f"<b>{html.escape(location)}</b>…")
+            except PlatformError as exc:
+                await status.edit_text(f"❌ {html.escape(exc.detail)}\nNothing was saved. {self._paste_more(platform)}",
+                                       reply_markup=_kb([[_done()]]))
+                return
+            except Exception as exc:
+                log.warning("session check failed: %s", type(exc).__name__)
+                await status.edit_text(f"❌ Couldn't check that session. Nothing was saved. {self._paste_more(platform)}",
+                                       reply_markup=_kb([[_done()]]))
+                return
+            finally:
+                await adapter.aclose()
 
         account_id = await self.db.upsert_account(
             platform, username, self.vault.encrypt(vault_context(platform, username), cookies),

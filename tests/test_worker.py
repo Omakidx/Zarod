@@ -5,7 +5,7 @@ import pytest
 from followbot.config import Limits, Settings
 from followbot.crypto import CookieVault, generate_key
 from followbot.db import Database
-from followbot.platforms import ActionBlocked, FollowResult, Outcome, RateLimited, SessionExpired, TransientError
+from followbot.platforms import ActionBlocked, FollowResult, NetworkError, Outcome, RateLimited, SessionExpired, TransientError
 from followbot.worker import Worker
 
 
@@ -146,6 +146,25 @@ async def test_transient_retries_then_fails(env):
     await drain(worker, clock)
     assert holder["adapter"].calls == ["a", "a", "a", "b"]
     assert (await db.job_counts(job)) == {"failed": 1, "followed": 1}
+
+
+async def test_a_dead_vpn_location_holds_the_account_without_failing_follows(env):
+    db, worker, clock, notes, holder, acc = env
+    holder["adapter"] = FakeAdapter({"a": NetworkError("Network error (ReadTimeout)")})
+    job = await db.create_job(acc, 99, ["a", "b"])
+    for _ in range(5):  # the location stays down through several retries
+        clock.t += 400
+        await worker.tick()
+    assert holder["adapter"].calls == ["a"] * 5
+    assert await db.job_counts(job) == {"pending": 2}  # nothing marked failed
+    account = await db.get_account(acc)
+    assert "isn't answering" in account.pause_reason and account.paused_until > clock.t
+    assert len(notes.alerts) == 1  # one alert when it starts, not one per retry
+
+    holder["adapter"].script = {}  # the location is back
+    await drain(worker, clock)
+    assert await db.job_counts(job) == {"followed": 2}
+    assert (await db.get_account(acc)).pause_reason is None
 
 
 async def test_rotated_cookies_are_persisted_encrypted(env):

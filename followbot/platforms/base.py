@@ -49,6 +49,13 @@ class TransientError(PlatformError):
     """Network trouble, VPN down, 5xx: worth retrying later."""
 
 
+class NetworkError(TransientError):
+    """No answer through the VPN location (timeout, refused, proxy down).
+
+    It says nothing about the profile being followed, so it must not use up that follow's retries.
+    """
+
+
 class Adapter(Protocol):
     platform: str
 

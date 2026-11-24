@@ -2,7 +2,7 @@ from __future__ import annotations
 
 import httpx
 
-from .base import TransientError
+from .base import NetworkError
 
 TIMEOUT = httpx.Timeout(20.0, connect=15.0)
 
@@ -46,12 +46,12 @@ async def send(client: httpx.AsyncClient, method: str, url: str, **kwargs) -> ht
     try:
         return await client.request(method, url, **kwargs)
     except httpx.ProxyError as exc:
-        raise TransientError("VPN proxy unreachable") from None
+        raise NetworkError("VPN proxy unreachable") from None
     except httpx.TransportError as exc:
         # `from None`: the original exception can embed the Cookie header.
         # Only our own curl message is shown: httpx's messages can quote request headers.
         said = f": {exc}" if str(exc).startswith("curl error") else ""
-        raise TransientError(f"Network error ({type(exc).__name__}{said})") from None
+        raise NetworkError(f"Network error ({type(exc).__name__}{said})") from None
 
 
 def json_or_none(resp: httpx.Response) -> dict | list | None:

@@ -15,6 +15,7 @@ from .db import Account, Database
 from .platforms import (
     ActionBlocked,
     Adapter,
+    NetworkError,
     RateLimited,
     SessionExpired,
     TransientError,
@@ -26,6 +27,7 @@ log = logging.getLogger(__name__)
 
 IDLE_POLL = 300.0
 LOOKUP_GAP = (3.0, 8.0)  # pause after a task that only looked a user up
+LOCATION_RETRY = 300.0   # wait this long when the account's VPN location doesn't answer
 
 
 class Notifier(Protocol):
@@ -44,16 +46,17 @@ class ProxyMissing(Exception):
     pass
 
 
-def pick_location(settings: Settings, accounts: list) -> str | None:
+def pick_location(settings: Settings, accounts: list, exclude: tuple | list = ()) -> str | None:
     """A VPN location for a new account: the first one no account uses yet, else the least used.
 
     Each location is one Ashburn server with its own exit IP, so accounts don't share an IP
     until there are more accounts than locations.
     """
-    if not settings.proxies:
+    names = [name for name in settings.proxies if name not in exclude]
+    if not names:
         return None
     used = Counter(a.proxy_name for a in accounts)
-    return min(settings.proxies, key=lambda name: (used[name], list(settings.proxies).index(name)))
+    return min(names, key=lambda name: (used[name], names.index(name)))
 
 
 async def spread_locations(db, settings: Settings) -> list[tuple]:
@@ -241,6 +244,21 @@ class Worker:
                 group=f"⏸ {exc.detail}. Resuming automatically in about {human_duration(exc.retry_after)}.",
                 who=name,
             )
+            return
+        except NetworkError as exc:
+            # The VPN location didn't answer: not this profile's fault, so the follow keeps its retries
+            # and the account just waits. One alert when it starts, not one every retry.
+            where = account.proxy_name or "direct"
+            reason = f"VPN location {where} isn't answering ({exc.detail})"
+            await self.forget(account.id)
+            await self.db.set_account_state(account.id, paused_until=now + LOCATION_RETRY, pause_reason=reason)
+            if not (account.pause_reason or "").startswith(f"VPN location {where} isn't answering"):
+                await self._alert(
+                    f"🌐 {name}: {reason}. Its follows wait and retry every {human_duration(LOCATION_RETRY)}.",
+                    group=f"🌐 VPN location {where} isn't answering. These accounts wait and retry every "
+                          f"{human_duration(LOCATION_RETRY)}; check the vpn service if it lasts.",
+                    who=name,
+                )
             return
         except Exception as exc:  # TransientError and anything unexpected
             if not isinstance(exc, TransientError):

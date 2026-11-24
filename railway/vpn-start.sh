@@ -7,7 +7,9 @@ set -eu
 # us-ash.prod.surfshark.com: one public key for all its IPs (from gluetun v3.40.0's server list).
 SERVER_PUBKEY="${VPN_SERVER_PUBKEY:-9ef2f8mXHnAxx06lx4OxhtzASfJgv6YfEimuVyef6QE=}"
 # Same order as docker-compose.yml: main, ash2, ash3, ash4, ash5.
-ENDPOINT_IPS="${VPN_ENDPOINT_IPS:-45.144.115.26 45.144.115.34 37.19.206.34 149.102.227.103 185.156.46.102}"
+# ash3 was 37.19.206.34 until Surfshark retired it (Nov 2026: no reply at all); `dig us-ash.prod.surfshark.com`
+# lists the current ones.
+ENDPOINT_IPS="${VPN_ENDPOINT_IPS:-45.144.115.26 45.144.115.34 151.240.254.12 149.102.227.103 185.156.46.102}"
 # Railway drops tunnel packets above this: tested there, 1420 and 1280 lose every full-size reply, 1200 works.
 MTU="${VPN_MTU:-1200}"
 umask 077

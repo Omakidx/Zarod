@@ -40,4 +40,5 @@ Notes:
 - Railway rejects `VOLUME` in a Dockerfile, so the root `Dockerfile` has none. Compose mounts `./data` itself.
 - Keep `ENCRYPTION_KEY` with the database. A new key means reconnecting every account with `/connect`.
 - The tunnels use MTU 1200: at 1280 or more, Railway drops full-size replies and requests through the VPN time out (curl error 28).
+- Surfshark retires server IPs now and then; a retired one gives no reply at all (ReadTimeout). `dig +short us-ash.prod.surfshark.com` lists current ones: put a replacement in `railway/vpn-start.sh` (or set `VPN_ENDPOINT_IPS`, five space-separated IPs in location order) and keep the location name, so its accounts keep a stable location. ash3 moved from 37.19.206.34 to 151.240.254.12 in Nov 2026.
 - Neither service needs a public domain. Run only one copy of the bot per Telegram token.
