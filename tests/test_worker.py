@@ -198,6 +198,19 @@ async def test_a_locked_or_suspended_account_leaves_the_work_list(env):
     assert (await db.get_account(acc)).status == "active"
 
 
+async def test_accounts_left_blocked_from_before_are_removed_but_vpn_ones_stay(env):
+    db, worker, clock, notes, holder, acc = env
+    vpn = await db.upsert_account("x", "novpn", worker.vault.encrypt("x:novpn", {"ct0": "1"}), "UA", None)
+    job = await db.create_job(acc, 99, ["a", "b"])
+    await db.set_account_state(acc, status="blocked", pause_reason="X has locked this account.")
+    await db.set_account_state(vpn, status="blocked", pause_reason="VPN location 'gone' is no longer configured in PROXIES")
+    assert await worker.remove_blocked_leftovers() == 1
+    assert (await db.get_account(acc)).status == "removed"
+    assert (await db.get_account(vpn)).status == "blocked"
+    assert await db.job_counts(job) == {"dropped": 2} and notes.finished == [job]
+    assert await worker.remove_blocked_leftovers() == 0  # nothing left to do on the next start
+
+
 async def test_handle_followed_before_is_already_without_a_request(env):
     db, worker, clock, notes, holder, acc = env
     holder["adapter"] = FakeAdapter({})

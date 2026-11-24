@@ -231,13 +231,7 @@ class Worker:
         except ActionBlocked as exc:
             # Locked, suspended or challenged: it can't follow until a human fixes it, so it leaves
             # the work list instead of holding its queue (and every job card) hostage.
-            await self.forget(account.id)
-            jobs = await self.db.remove_account(account.id, exc.detail)
-            fix = ("Removed from your accounts and its queued follows dropped. "
-                   "Once it's fixed, tap Add account with fresh cookies to use it again.")
-            await self._alert(f"🗑 {name}: {exc.detail} {fix}", group=f"🗑 {exc.detail} {fix}", who=name)
-            for job_id in jobs:
-                await self._after_task(job_id)
+            await self._remove(account, exc.detail)
             return
         except RateLimited as exc:
             until = now + exc.retry_after
@@ -268,6 +262,28 @@ class Worker:
         await self.db.set_account_state(account.id, next_action_at=now + gap, pause_reason=None, clear_reason=True)
         await self._save_rotated_cookies(account, adapter)
         await self._after_task(task.job_id)
+
+    async def remove_blocked_leftovers(self) -> int:
+        """Remove accounts still marked blocked by the platform from before locked accounts were
+        removed automatically. Ones held only for a missing VPN location stay: that's a settings fix.
+        Returns how many were removed."""
+        removed = 0
+        for account in await self.db.list_accounts():
+            if account.status != "blocked" or "VPN location" in (account.pause_reason or ""):
+                continue
+            await self._remove(account, account.pause_reason or "Locked or suspended by the platform.")
+            removed += 1
+        return removed
+
+    async def _remove(self, account: Account, why: str) -> None:
+        await self.forget(account.id)
+        jobs = await self.db.remove_account(account.id, why)
+        name = f"@{account.username} ({account.platform})"
+        fix = ("Removed from your accounts and its queued follows dropped. "
+               "Once it's fixed, tap Add account with fresh cookies to use it again.")
+        await self._alert(f"🗑 {name}: {why} {fix}", group=f"🗑 {why} {fix}", who=name)
+        for job_id in jobs:
+            await self._after_task(job_id)
 
     async def _after_task(self, job_id: int) -> None:
         finished = await self.db.finish_job_if_complete(job_id)

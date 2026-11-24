@@ -58,6 +58,7 @@ async def run_bot() -> None:
         except Exception as exc:  # e.g. you haven't pressed /start in the bot yet
             log.warning("couldn't message the owner: %s", type(exc).__name__)
 
+    await worker.remove_blocked_leftovers()  # before spreading, so their locations are free again
     for account, location in await spread_locations(db, settings):
         await report(f"🌍 {PLATFORM_NAMES[account.platform]} @{account.username} now has its own IP: location {location}.")
     await import_cookie_files(settings, db, vault, worker, report)
