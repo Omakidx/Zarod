@@ -61,6 +61,24 @@ HELD = {"paused": "⏸ paused, tap Resume all", "blocked": "⛔ blocked, tap Res
         "expired": "🔑 needs new cookies (Add account)"}
 
 
+# Telegram refuses messages over 4096 characters; stay under it with room for markup.
+MESSAGE_LIMIT = 3800
+
+
+def split_message(lines: list[str], limit: int = MESSAGE_LIMIT) -> list[str]:
+    """Pack lines into as few messages as fit under Telegram's limit (an overlong line is cut)."""
+    messages, current = [], ""
+    for line in lines:
+        line = line if len(line) <= limit else line[: limit - 1] + "…"
+        if current and len(current) + 1 + len(line) > limit:
+            messages.append(current)
+            current = ""
+        current = f"{current}\n{line}" if current else line
+    if current:
+        messages.append(current)
+    return messages
+
+
 class ConnectFlow(StatesGroup):
     cookies = State()
 
@@ -152,29 +170,42 @@ class BotApp:
             return
         await self._render_job(job_id, final=True)
         totals: dict[str, int] = {}
-        sections = []
+        # Per problem: the handles (each once) and which accounts it happened to, across the whole batch.
+        found: dict[str, dict] = {s: {"handles": {}, "who": set(), "count": 0, "last": ""} for s in PROBLEMS}
         for j in jobs:
             for status, n in (await self.db.job_counts(j.id)).items():
                 totals[status] = totals.get(status, 0) + n
             account = await self.db.get_account(j.account_id)
             who = f"@{html.escape(account.username)}" if account else "a removed account"
-            problems = await self.db.job_task_details(j.id, tuple(PROBLEMS))
-            for status, heading in PROBLEMS.items():
-                rows = [(h, d) for h, st, d in problems if st == status]
-                if not rows:
-                    continue
-                handles = ", ".join("@" + html.escape(h) for h, _ in rows[:40])
-                if len(rows) > 40:
-                    handles += f", … +{len(rows) - 40}"
-                sections.append(f"{heading.format(who=who)} ({len(rows)}): {handles}")
-                if status in ("failed", "dropped"):
-                    label = "last error" if status == "failed" else "why"
-                    sections.append(f"   {label}: {html.escape(rows[-1][1][:120])}")
+            for handle, status, detail in await self.db.job_task_details(j.id, tuple(PROBLEMS)):
+                entry = found[status]
+                entry["handles"].setdefault(handle.lower(), handle)
+                entry["who"].add(who)
+                entry["count"] += 1
+                entry["last"] = detail
+        sections = []
+        for status, heading in PROBLEMS.items():
+            entry = found[status]
+            if not entry["count"]:
+                continue
+            names = list(entry["handles"].values())
+            who = next(iter(entry["who"])) if len(entry["who"]) == 1 else f"{len(entry['who'])} accounts"
+            handles = ", ".join("@" + html.escape(h) for h in names[:40])
+            if len(names) > 40:
+                handles += f", … +{len(names) - 40}"
+            if status == "dropped":
+                sections.append(f"{heading.format(who=who)} ({entry['count']} follows)")
+            else:
+                sections.append(f"{heading.format(who=who)} ({entry['count']}): {handles}")
+            if status in ("failed", "dropped"):
+                label = "last error" if status == "failed" else "why"
+                sections.append(f"   {label}: {html.escape(entry['last'][:120])}")
         summary = " · ".join(f"{label} {totals[st]}" for st, label in STATUS_ICONS if totals.get(st))
         lines = [f"🏁 <b>Job #{job.batch_id} finished</b>", summary or "Nothing to do."]
         if sections:
             lines += [""] + sections
-        await self.bot.send_message(job.chat_id, "\n".join(lines))
+        for text in split_message(lines):
+            await self.bot.send_message(job.chat_id, text)
         # Only once it's sent: if Telegram refused it, the Outbox's retry must not find it "done".
         self._reported.add(job.batch_id)
 
@@ -210,6 +241,9 @@ class BotApp:
         if platform:
             head += f" · {PLATFORM_NAMES[platform]} · {len(jobs)} account{'s' if len(jobs) != 1 else ''}"
         text = head + "\n" + "\n".join(rows)
+        if len(text) > MESSAGE_LIMIT - 200:
+            # Too many accounts for a line each (Telegram would refuse the edit): totals instead.
+            text = head + "\n" + await self._batch_summary(jobs)
         if left:
             gaps = self.settings.limits
             text += f"\n⏳ {left} left · one every {gaps.gap_min:.0f}–{gaps.gap_max:.0f} s per account"
@@ -705,18 +739,66 @@ class BotApp:
         account = await self.db.get_account(account.id)
         await query.message.edit_text(await self._account_line(account))
 
+    async def _batch_summary(self, jobs: list) -> str:
+        """A job's totals and where its accounts stand, short enough for any number of accounts."""
+        totals: dict[str, int] = {}
+        states: dict[str, int] = {}
+        now = time.time()
+        soonest = float("inf")
+        for j in jobs:
+            counts = await self.db.job_counts(j.id)
+            for status, n in counts.items():
+                totals[status] = totals.get(status, 0) + n
+            account = await self.db.get_account(j.account_id)
+            if not counts.get("pending"):
+                state = "✔️ done"
+            elif account is None or account.status in HELD:
+                state = HELD.get(account.status, "removed") if account else "removed"
+            else:
+                ready = await self.worker.ready_at(account)
+                soonest = min(soonest, ready)
+                state = "▶️ following" if ready - now <= 120 else "⏳ waiting for its limits"
+            states[state] = states.get(state, 0) + 1
+        total = sum(totals.values())
+        done = total - totals.get("pending", 0)
+        parts = [f"{label} {totals[s]}" for s, label in STATUS_ICONS if totals.get(s)]
+        lines = [f"{done}/{total} done" + (" · " + " · ".join(parts) if parts else "")]
+        lines.append("Accounts: " + " · ".join(f"{s} {n}" for s, n in sorted(states.items(), key=lambda kv: -kv[1])))
+        if soonest != float("inf") and soonest - now > 120:
+            lines.append("next follow ~" + time.strftime("%H:%M", time.localtime(soonest)))
+        return "\n".join(lines)
+
     async def cmd_queue(self, message: Message) -> None:
-        lines = []
+        now = time.time()
+        lines = ["🗂 <b>Queue</b>"]
+        for batch_id in await self.db.open_batches():
+            jobs = await self.db.batch_jobs(batch_id)
+            account = await self.db.get_account(jobs[0].account_id) if jobs else None
+            name = PLATFORM_NAMES.get(account.platform, "") if account else ""
+            lines += ["", f"<b>Job #{batch_id}</b> · {name} · {len(jobs)} accounts", await self._batch_summary(jobs)]
+
+        waiting = []
         for account in await self.db.list_accounts():
-            if await self.db.pending_count(account.id) == 0:
+            queued = await self.db.pending_count(account.id)
+            if not queued:
                 continue
-            line = await self._account_line(account)
             ready = await self.worker.ready_at(account)
-            if ready != float("inf"):
-                wait = ready - time.time()
-                line += "\nnext follow: " + ("now" if wait <= 1 else f"in {human_duration(wait)}")
-            lines.append(line)
-        await message.answer("\n\n".join(lines) if lines else "Nothing queued.")
+            if account.status in HELD:
+                when = HELD[account.status]
+            elif ready - now <= 1:
+                when = "next now"
+            else:
+                when = f"next in {human_duration(ready - now)}"
+            daily, hourly = account_caps(self.settings, account, now)
+            warm = " 🌱" if hourly else ""
+            waiting.append((ready, f"@{html.escape(account.username)} ({account.platform}){warm} · {queued} queued · {when}"))
+        if not waiting:
+            await message.answer("Nothing queued.")
+            return
+        lines += ["", f"<b>{len(waiting)} accounts with follows queued</b> (soonest first; 🌱 = warming up)"]
+        lines += [line for _, line in sorted(waiting, key=lambda w: w[0])]
+        for text in split_message(lines):
+            await message.answer(text)
 
     async def cmd_pause(self, message: Message) -> None:
         for account in await self.db.list_accounts():

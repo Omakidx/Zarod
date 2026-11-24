@@ -427,3 +427,54 @@ async def test_done_ends_the_add_account_step_and_keeps_the_result(env):
     assert await state.get_state() is None
     message.edit_text.assert_not_awaited()
     assert message.edit_reply_markup.await_args.kwargs == {"reply_markup": None}
+
+
+async def _many_accounts(db, worker, n=80, queued=12):
+    ids = []
+    for i in range(n):
+        ids.append(await db.upsert_account(
+            "x", f"worker_account_{i:03d}", worker.vault.encrypt(f"x:worker_account_{i:03d}", {"ct0": "1"}), "UA", "us"))
+    batch = None
+    for acc in ids:
+        job = await db.create_job(acc, 1, [f"target_profile_{k}" for k in range(queued)], batch_id=batch)
+        batch = batch or job
+        await db.set_job_message(job, 5)
+    return ids, batch
+
+
+async def test_queue_with_many_accounts_fits_telegrams_limit(env):
+    db, worker, *_ = env
+    app, msg = make_app(db, worker), fake_message()
+    await _many_accounts(db, worker)
+    await app.cmd_queue(msg)
+    texts = [c.args[0] for c in msg.answer.await_args_list]
+    assert texts and all(len(t) <= 4096 for t in texts)
+    assert "Job #" in texts[0] and "0/960 done" in texts[0]
+    assert "80 accounts with follows queued" in "".join(texts)
+    assert sum(t.count("· 12 queued ·") for t in texts) == 80  # every account is listed
+
+
+async def test_job_card_with_many_accounts_is_a_summary_that_fits(env):
+    db, worker, *_ = env
+    app = make_app(db, worker)
+    _, batch = await _many_accounts(db, worker, n=120)  # a line each would be ~5,000 characters
+    await app._render_job(batch, final=False)
+    card = app.bot.edit_message_text.await_args.args[0]
+    assert len(card) <= 4096
+    assert "0/1440 done" in card and "Accounts:" in card
+
+
+async def test_finished_report_with_many_accounts_groups_problems_and_fits(env):
+    db, worker, *_ = env
+    app = make_app(db, worker)
+    app._reported = set()
+    _, batch = await _many_accounts(db, worker, queued=6)
+    for job in await db.batch_jobs(batch):
+        rows = await (await db.conn.execute("SELECT id FROM tasks WHERE job_id = ?", (job.id,))).fetchall()
+        for r in rows:
+            await db.finish_task(r["id"], "not_found", "")
+        await db.finish_job_if_complete(job.id)
+    await app.report_finished(batch)
+    texts = [c.args[1] for c in app.bot.send_message.await_args_list]
+    assert texts and all(len(t) <= 4096 for t in texts)
+    assert "❓ Not found, or hidden from 80 accounts (480): @target_profile_0" in texts[0]
