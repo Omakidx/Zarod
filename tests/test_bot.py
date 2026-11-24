@@ -299,8 +299,32 @@ async def test_accounts_button_asks_platform_then_lists_it(env):
 
     query = SimpleNamespace(answer=AsyncMock(), message=SimpleNamespace(edit_text=AsyncMock(), answer=AsyncMock()))
     await app.on_accounts_platform(query, SimpleNamespace(value="instagram"))
-    cards = [c.args[0] for c in query.message.answer.await_args_list]
-    assert len(cards) == 1 and "@gram" in cards[0]
+    assert not query.message.answer.await_args_list  # the picker turns into the list, no extra messages
+    text = query.message.edit_text.await_args.args[0]
+    assert "<b>Instagram</b>: 1 account" in text and "1. <b>Instagram @gram</b>" in text
+
+
+async def test_many_accounts_are_one_paged_message(env):
+    db, worker, *_ = env
+    app, msg = make_app(db, worker), fake_message()
+    ids, _ = await _many_accounts(db, worker, n=20, queued=1)
+    await app.cmd_accounts(msg)
+    assert len(msg.answer.await_args_list) == 1
+    text, markup = msg.answer.await_args.args[0], msg.answer.await_args.kwargs["reply_markup"]
+    assert "<b>X</b>: 21 accounts" in text and "Page 1/3" in text and len(text) <= 4096
+    buttons = [b.text for row in markup.inline_keyboard for b in row]
+    assert "1. Pause" in buttons and "8. Remove" in buttons and "Next ▶" in buttons and "9. Pause" not in buttons
+
+    # Next page, then pause account 9 from it: the page is redrawn in place with the new state.
+    query = SimpleNamespace(answer=AsyncMock(), message=SimpleNamespace(edit_text=AsyncMock(), answer=AsyncMock()))
+    await app.on_accounts_page(query, Pick(kind="apage", value="x.1"))
+    page2 = query.message.edit_text.await_args
+    assert "Page 2/3" in page2.args[0] and "9. <b>X @worker_account_007</b>" in page2.args[0]
+    pause9 = next(b for row in page2.kwargs["reply_markup"].inline_keyboard for b in row if b.text == "9. Pause")
+    await app.on_account_action(query, Pick.unpack(pause9.callback_data))
+    assert (await db.get_account(ids[7])).status == "paused"
+    after = query.message.edit_text.await_args
+    assert "Page 2/3" in after.args[0] and "9. Resume" in [b.text for row in after.kwargs["reply_markup"].inline_keyboard for b in row]
 
 
 class _Adapter:

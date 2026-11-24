@@ -82,7 +82,7 @@ When every account is done, you get one message listing, per account, the accoun
 | Button | Shows |
 |---|---|
 | **🗂 Queue** | Per account: what's queued, today's count against the cap, and when the next follow goes out |
-| **👥 My accounts** | Choose **Instagram** or **X**, then each of that platform's accounts with its status and VPN location, and **Pause/Resume** and **Remove** buttons |
+| **👥 My accounts** | Choose **Instagram** or **X**: one message with a summary (active, paused, warming up…), then 8 accounts per page with status, VPN location, today's follows and queue, numbered **Pause/Resume** and **Remove** buttons, and **◀ Prev / Next ▶** |
 | **✋ Pause all** · **▶️ Resume all** | Pause or resume every account at once |
 | **🗑 Clear queue** | Cancel everything that hasn't been sent yet |
 | **❌ Cancel** (inside a step) | Leave the step you're in. Tapping any menu button also ends it |

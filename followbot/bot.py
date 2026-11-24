@@ -63,6 +63,7 @@ HELD = {"paused": "⏸ paused, tap Resume all", "blocked": "⛔ blocked, tap Res
 
 # Telegram refuses messages over 4096 characters; stay under it with room for markup.
 MESSAGE_LIMIT = 3800
+ACCOUNTS_PER_PAGE = 8  # My accounts shows this many per page, each with its buttons
 
 
 def split_message(lines: list[str], limit: int = MESSAGE_LIMIT) -> list[str]:
@@ -89,7 +90,7 @@ class FollowFlow(StatesGroup):
 
 
 class Pick(CallbackData, prefix="p"):
-    kind: str          # platform | location | fplat | aplat | confirm | acct | cancel
+    kind: str          # platform | location | fplat | aplat | apage | confirm | acct | cancel
     value: str
 
 
@@ -274,6 +275,7 @@ class BotApp:
         r.callback_query(Pick.filter(F.kind == "aplat"))(self.on_accounts_platform)
         r.callback_query(Pick.filter(F.kind == "confirm"))(self.on_confirm)
         r.callback_query(Pick.filter(F.kind == "acct"))(self.on_account_action)
+        r.callback_query(Pick.filter(F.kind == "apage"))(self.on_accounts_page)
         r.callback_query(Pick.filter(F.kind == "cancel"))(self.on_cancel_button)
         r.message(StateFilter(ConnectFlow.cookies))(self.on_cookies)
         r.message(StateFilter(FollowFlow.handles, FollowFlow.confirm))(self.on_handles)
@@ -689,31 +691,74 @@ class BotApp:
 
     async def on_accounts_platform(self, query: CallbackQuery, callback_data: Pick) -> None:
         await query.answer()
-        accounts = await self.db.list_accounts(callback_data.value)
-        n = len(accounts)
-        await query.message.edit_text(f"<b>{PLATFORM_NAMES[callback_data.value]}</b>: {n} account{'s' if n != 1 else ''}")
-        await self._show_accounts(query.message, accounts)
+        text, markup = await self._accounts_page(callback_data.value, 0)
+        await query.message.edit_text(text, reply_markup=markup)
+
+    async def on_accounts_page(self, query: CallbackQuery, callback_data: Pick) -> None:
+        await query.answer()
+        platform, _, page = callback_data.value.partition(".")
+        text, markup = await self._accounts_page(platform, int(page or 0))
+        await query.message.edit_text(text, reply_markup=markup)
 
     async def _show_accounts(self, message: Message, accounts: list[Account]) -> None:
         if not accounts:
             await message.answer("No accounts on that platform. Tap <b>Add account</b>.")
             return
-        for account in accounts:
-            toggle = (("Resume", "resume", "resume", ui.GREEN) if account.status != "active"
-                      else ("Pause", "pause", "pause", None))
-            await message.answer(
-                await self._account_line(account),
-                reply_markup=_kb([[(toggle[0], Pick(kind="acct", value=f"{toggle[1]}.{account.id}"), toggle[2], toggle[3]),
-                                   ("Remove", Pick(kind="acct", value=f"rm.{account.id}"), "clear", ui.RED)]]),
-            )
+        text, markup = await self._accounts_page(accounts[0].platform, 0)
+        await message.answer(text, reply_markup=markup)
+
+    async def _accounts_page(self, platform: str, page: int, note: str = "") -> tuple[str, InlineKeyboardMarkup | None]:
+        """One message for all of a platform's accounts: a summary, then ACCOUNTS_PER_PAGE at a time with
+        their Pause/Resume and Remove buttons, and Prev/Next to page through. (A message per account
+        was 70+ messages with this many accounts.)"""
+        accounts = await self.db.list_accounts(platform)
+        name = PLATFORM_NAMES[platform]
+        if not accounts:
+            return f"{note}No {name} accounts. Tap <b>Add account</b>.", None
+        now = time.time()
+        pages = (len(accounts) + ACCOUNTS_PER_PAGE - 1) // ACCOUNTS_PER_PAGE
+        page = max(0, min(page, pages - 1))
+        states: dict[str, int] = {}
+        warming = 0
+        for a in accounts:
+            label = {"active": "🟢 active", "paused": "⏸ paused", "expired": "🔑 expired", "blocked": "⛔ blocked"}.get(
+                a.status, a.status)
+            states[label] = states.get(label, 0) + 1
+            warming += account_caps(self.settings, a, now)[1] is not None
+        summary = " · ".join(f"{k} {v}" for k, v in states.items())
+        if warming:
+            summary += f" · 🌱 warming up {warming}"
+        lines = [f"{note}<b>{name}</b>: {len(accounts)} account{'s' if len(accounts) != 1 else ''}", summary]
+        if pages > 1:
+            lines.append(f"Page {page + 1}/{pages}")
+        rows = []
+        first = page * ACCOUNTS_PER_PAGE
+        for number, account in enumerate(accounts[first:first + ACCOUNTS_PER_PAGE], start=first + 1):
+            lines += ["", f"{number}. " + await self._account_line(account)]
+            if account.status == "active":
+                toggle = (f"{number}. Pause", "pause", "pause", None)
+            else:
+                toggle = (f"{number}. Resume", "resume", "resume", ui.GREEN)
+            rows.append([(toggle[0], Pick(kind="acct", value=f"{toggle[1]}.{account.id}.{page}"), toggle[2], toggle[3]),
+                         (f"{number}. Remove", Pick(kind="acct", value=f"rm.{account.id}.{page}"), "clear", ui.RED)])
+        nav = []
+        if page > 0:
+            nav.append(("◀ Prev", Pick(kind="apage", value=f"{platform}.{page - 1}")))
+        if page < pages - 1:
+            nav.append(("Next ▶", Pick(kind="apage", value=f"{platform}.{page + 1}")))
+        if nav:
+            rows.append(nav)
+        return "\n".join(lines), _kb(rows)
 
     async def on_account_action(self, query: CallbackQuery, callback_data: Pick) -> None:
         await query.answer()
-        action, _, raw_id = callback_data.value.partition(".")
+        action, raw_id, *rest = callback_data.value.split(".")
+        page = int(rest[0]) if rest else 0  # buttons from before paging carry no page
         account = await self.db.get_account(int(raw_id))
-        if account is None:
+        if account is None or account.status == "removed":
             await query.message.edit_text("That account is already gone.")
             return
+        note = ""
         if action == "pause":
             await self.db.set_account_state(account.id, status="paused")
         elif action == "resume":
@@ -725,8 +770,8 @@ class BotApp:
         elif action == "rm":
             await query.message.edit_text(
                 f"Remove {_label(account)}? Its stored cookies and queue are deleted.",
-                reply_markup=_kb([[("Yes, remove", Pick(kind="acct", value=f"rmyes.{account.id}"), "clear", ui.RED),
-                                   ("Keep", Pick(kind="cancel", value="keep"), "cancel", None)]]),
+                reply_markup=_kb([[("Yes, remove", Pick(kind="acct", value=f"rmyes.{account.id}.{page}"), "clear", ui.RED),
+                                   ("Keep", Pick(kind="apage", value=f"{account.platform}.{page}"), "cancel", None)]]),
             )
             return
         elif action == "rmyes":
@@ -734,10 +779,9 @@ class BotApp:
             await self.db.delete_account(account.id)
             again = " Restart the bot to import it again from its cookie file, or" if (
                 account.platform in self.settings.cookie_files) else ""
-            await query.message.edit_text(f"Removed {_label(account)}.{again} tap <b>Add account</b> to add it back.")
-            return
-        account = await self.db.get_account(account.id)
-        await query.message.edit_text(await self._account_line(account))
+            note = f"🗑 Removed {_label(account)}.{again} Tap <b>Add account</b> to add it back.\n\n"
+        text, markup = await self._accounts_page(account.platform, page, note)
+        await query.message.edit_text(text, reply_markup=markup)
 
     async def _batch_summary(self, jobs: list) -> str:
         """A job's totals and where its accounts stand, short enough for any number of accounts."""
