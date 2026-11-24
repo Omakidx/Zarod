@@ -277,7 +277,11 @@ class Worker:
             gap = random_gap(self.settings.limits.gap_min, self.settings.limits.gap_max, self.rng)
         else:
             gap = self.rng.uniform(*LOOKUP_GAP)
-        await self.db.set_account_state(account.id, next_action_at=now + gap, pause_reason=None, clear_reason=True)
+        next_at = now + gap
+        if result.resume_at:
+            # The platform's own window is nearly used up: wait for its reset (plus a little jitter).
+            next_at = max(next_at, result.resume_at + self.rng.uniform(5, 30))
+        await self.db.set_account_state(account.id, next_action_at=next_at, pause_reason=None, clear_reason=True)
         await self._save_rotated_cookies(account, adapter)
         await self._after_task(task.job_id)
 

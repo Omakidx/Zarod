@@ -21,6 +21,9 @@ class FollowResult:
     # True when a follow request was actually sent; only those count against the rate budget.
     action_sent: bool
     detail: str = ""
+    # When the platform says this account's follow budget is (nearly) used up: don't follow again
+    # before this time (epoch seconds), so its limit is never hit.
+    resume_at: float | None = None
 
 
 class PlatformError(Exception):

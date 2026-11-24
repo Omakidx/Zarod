@@ -167,6 +167,18 @@ async def test_a_dead_vpn_location_holds_the_account_without_failing_follows(env
     assert (await db.get_account(acc)).pause_reason is None
 
 
+async def test_the_platforms_own_window_is_waited_out_before_it_refuses(env):
+    db, worker, clock, notes, holder, acc = env
+    reset = clock.t + 600
+    holder["adapter"] = FakeAdapter({"a": FollowResult(Outcome.FOLLOWED, True, resume_at=reset)})
+    await db.create_job(acc, 99, ["a", "b"])
+    await worker.tick()
+    account = await db.get_account(acc)
+    assert reset + 5 <= account.next_action_at <= reset + 30
+    assert await worker.ready_at(account) >= reset
+    assert notes.alerts == []  # a planned wait, not a problem
+
+
 async def test_rotated_cookies_are_persisted_encrypted(env):
     db, worker, clock, notes, holder, acc = env
     adapter = FakeAdapter({})

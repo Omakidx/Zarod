@@ -70,6 +70,18 @@ class TestX:
         r = await x_adapter(handler).follow("bob")
         assert (r.outcome, r.action_sent) == (Outcome.FOLLOWED, True)
 
+    @pytest.mark.parametrize("remaining,waits", [("5", False), ("1", True), ("0", True)])
+    async def test_follow_reports_when_xs_own_window_is_nearly_used(self, remaining, waits):
+        def handler(req):
+            if "lookup" in req.url.path:
+                return httpx.Response(200, json=[])
+            return httpx.Response(200, json={"id_str": "1"}, headers={
+                "x-rate-limit-limit": "15", "x-rate-limit-remaining": remaining, "x-rate-limit-reset": "1800000000"})
+
+        r = await x_adapter(handler).follow("bob")
+        assert r.outcome == Outcome.FOLLOWED
+        assert r.resume_at == (1800000000.0 if waits else None)
+
     async def test_protected_user_is_requested(self):
         def handler(req):
             if "lookup" in req.url.path:

@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import logging
 import time
 from urllib.parse import unquote
 
@@ -30,6 +31,18 @@ _UNAVAILABLE_CODES = {63, 162}
 _DAILY_LIMIT_CODE = 161
 _RATE_CODES = {88}
 _ALREADY_REQUESTED_CODE = 160
+# Stop while X still shows this many follows left in its window, rather than at 0.
+FOLLOW_RESERVE = 1
+
+log = logging.getLogger(__name__)
+
+
+def follow_budget(resp: httpx.Response) -> tuple[int, int, float] | None:
+    """X's own follow window from the response headers: (limit, remaining, reset epoch)."""
+    values = [resp.headers.get(f"x-rate-limit-{k}", "") for k in ("limit", "remaining", "reset")]
+    if not all(v.isdigit() for v in values):
+        return None
+    return int(values[0]), int(values[1]), float(values[2])
 
 
 class XAdapter:
@@ -142,10 +155,21 @@ class XAdapter:
         errors = body.get("errors", []) if isinstance(body, dict) else []
         codes = {e.get("code") for e in errors if isinstance(e, dict)}
 
+        # X has its own follow window, tighter than ours at times. It says how much is left on every
+        # follow, so wait for its reset before running out instead of finding out from a 429.
+        resume_at = None
+        budget = follow_budget(resp)
+        if budget:
+            limit, remaining, reset = budget
+            if remaining <= FOLLOW_RESERVE:
+                resume_at = reset
+                log.info("X follow window: %d/%d left, waiting %.0f s for its reset",
+                         remaining, limit, reset - time.time())
+
         if resp.status_code == 200 and isinstance(body, dict) and body.get("id_str"):
             if body.get("protected"):
-                return FollowResult(Outcome.REQUESTED, action_sent=True)
-            return FollowResult(Outcome.FOLLOWED, action_sent=True)
+                return FollowResult(Outcome.REQUESTED, action_sent=True, resume_at=resume_at)
+            return FollowResult(Outcome.FOLLOWED, action_sent=True, resume_at=resume_at)
         if _ALREADY_REQUESTED_CODE in codes:
             return FollowResult(Outcome.ALREADY, action_sent=True, detail="request already pending")
         if codes & _NOT_FOUND_CODES or resp.status_code == 404:
