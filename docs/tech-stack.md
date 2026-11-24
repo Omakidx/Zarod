@@ -97,7 +97,7 @@ Both adapters send your cookies plus the CSRF header the website itself sends. T
 | X code 161, Instagram `feedback_required` | Pauses the account for 6 h (X) or 12 h (Instagram), then resumes on its own |
 | HTTP 429 | Pauses the account for 15 min–1 h, then resumes on its own |
 | 401, `login_required` | Marks the account *expired* and holds the queue until you `/connect` again |
-| `challenge_required`, account locked | Marks the account *blocked* until you fix it and send `/resume` |
+| `challenge_required`, account locked or suspended | Removes the account from the work list (cookies wiped, queued follows dropped; history kept). Add it again with fresh cookies once fixed |
 | Network or VPN errors, 5xx | Retries after 1, 2, then 3 minutes, then marks the task `failed` |
 
 ## Rate budget

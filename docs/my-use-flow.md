@@ -93,7 +93,7 @@ When every account is done, you get one message listing, per account, the accoun
 |---|---|---|
 | ⏸ *rate limit … resuming automatically in 6 h* | The platform pushed back, so the bot backed off | **Nothing.** It resumes on its own. If this happens often, lower the daily caps in `.env.local` |
 | 🔑 *session expired … tap Add account* | Your cookies stopped working | Log in again through the same VPN server, re-export, and **🔗 Add account**. The queue continues from where it stopped |
-| ⛔ *wants you to confirm it's you* | A challenge or checkpoint, or a locked account | Open the app or website, complete the check, wait a few hours, then **▶️ Resume all** |
+| 🗑 *locked / suspended / wants you to confirm it's you* | The platform locked, suspended or challenged the account. The bot removes it from your accounts and drops its queued follows, so jobs finish without it | Fix it in the app or website, then **➕ Add account** with fresh cookies to use it again |
 | ⛔ *VPN location … no longer configured* | The `PROXIES` setting changed | Fix `.env.local`, run `./dc up -d`, then **▶️ Resume all** |
 
 ## 5. Habits that keep your accounts safe

@@ -117,7 +117,7 @@ Claude can run steps 3–4 for you once you say the files are in place. Claude r
 |---|---|---|
 | `SessionExpired` right away on X | X now wants extra headers (`x-client-transaction-id`) | Claude switches the X adapter to twikit (about 1 hour of work) and you rerun phase 3 |
 | `SessionExpired` on Instagram | The cookies were made on a different IP, or the user agent doesn't match | Re-export through the same Surfshark server and check `BROWSER_USER_AGENT` |
-| `ActionBlocked` | The platform wants a verification | Open the app, confirm it's you, wait a few hours, retry |
+| `ActionBlocked` | Locked, suspended, or the platform wants a verification | The bot removes the account and drops its queue. Fix it in the app, then add it again with fresh cookies |
 | `TransientError: …` | The VPN container is down or still connecting | Check `./dc ps` and `./dc logs vpn` |
 
 ---

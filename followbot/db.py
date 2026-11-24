@@ -15,7 +15,7 @@ CREATE TABLE IF NOT EXISTS accounts (
     cookies_enc    TEXT NOT NULL,
     user_agent     TEXT NOT NULL,
     proxy_name     TEXT,
-    status         TEXT NOT NULL DEFAULT 'active',   -- active | paused | expired | blocked
+    status         TEXT NOT NULL DEFAULT 'active',   -- active | paused | expired | blocked | removed
     paused_until   REAL NOT NULL DEFAULT 0,
     pause_reason   TEXT,
     next_action_at REAL NOT NULL DEFAULT 0,
@@ -147,10 +147,12 @@ class Database:
         return _account(row) if row else None
 
     async def list_accounts(self, platform: str | None = None) -> list[Account]:
+        """Your accounts. Ones removed for being locked or suspended aren't among them."""
         if platform:
-            cur = await self.conn.execute("SELECT * FROM accounts WHERE platform = ? ORDER BY id", (platform,))
+            cur = await self.conn.execute(
+                "SELECT * FROM accounts WHERE platform = ? AND status != 'removed' ORDER BY id", (platform,))
         else:
-            cur = await self.conn.execute("SELECT * FROM accounts ORDER BY platform, id")
+            cur = await self.conn.execute("SELECT * FROM accounts WHERE status != 'removed' ORDER BY platform, id")
         return [_account(r) for r in await cur.fetchall()]
 
     async def set_account_location(self, account_id: int, proxy_name: str) -> None:
@@ -164,6 +166,23 @@ class Database:
         )
         await self.conn.execute("DELETE FROM accounts WHERE id = ?", (account_id,))
         await self.conn.commit()
+
+    async def remove_account(self, account_id: int, reason: str) -> list[int]:
+        """Take a locked or suspended account out of use: its cookies are wiped and its queued
+        follows dropped. The row stays so job history still names it; adding it again revives it.
+        Returns the jobs that had follows dropped."""
+        await self.conn.execute(
+            "UPDATE accounts SET status = 'removed', cookies_enc = '', pause_reason = ? WHERE id = ?",
+            (reason, account_id),
+        )
+        cur = await self.conn.execute(
+            "UPDATE tasks SET status = 'dropped', detail = ?, done_at = ? "
+            "WHERE account_id = ? AND status = 'pending' RETURNING job_id",
+            (reason, time.time(), account_id),
+        )
+        jobs = sorted({r["job_id"] for r in await cur.fetchall()})
+        await self.conn.commit()
+        return jobs
 
     async def update_cookies(self, account_id: int, cookies_enc: str) -> None:
         await self.conn.execute("UPDATE accounts SET cookies_enc = ? WHERE id = ?", (cookies_enc, account_id))

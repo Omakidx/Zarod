@@ -23,7 +23,7 @@ It runs **on this machine** in Docker. X and Instagram traffic goes out through 
 - **Safety stops:**
   - **Rate limited:** the account pauses for hours and then resumes on its own.
   - **Session expired:** the queue is held until you reconnect.
-  - **Challenge or locked account:** the queue is held until you fix it in the app and send `/resume`.
+  - **Challenge, locked or suspended account:** it's removed from your accounts automatically and its queued follows are dropped, so jobs finish without it. Fix it in the app, then add it again with fresh cookies.
   - **VPN down:** follows are retried, and nothing is ever sent outside the VPN.
 - **VPN.** Each account gets its own Ashburn Surfshark server, and so its own exit IP, and keeps it. Five servers run by default (`main`, `ash2` … `ash5`); a sixth account would share the least-used one. Only X and Instagram traffic goes through the VPN.
 

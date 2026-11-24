@@ -47,12 +47,14 @@ STATUS_ICONS = [
     ("unavailable", "🚫 unavailable"),
     ("failed", "⚠️ failed"),
     ("cancelled", "✖️ cancelled"),
+    ("dropped", "🗑 dropped"),
 ]
 # What the finished report lists by name, and how it explains each.
 PROBLEMS = {
     "not_found": "❓ Not found, or hidden from {who}",
     "unavailable": "🚫 Can't be followed by {who} (blocked or suspended)",
     "failed": "⚠️ Failed for {who} after retries",
+    "dropped": "🗑 Dropped: {who} was locked or suspended and removed",
 }
 # Why an account's queued follows aren't moving, shown on the job card.
 HELD = {"paused": "⏸ paused, tap Resume all", "blocked": "⛔ blocked, tap Resume all",
@@ -165,8 +167,9 @@ class BotApp:
                 if len(rows) > 40:
                     handles += f", … +{len(rows) - 40}"
                 sections.append(f"{heading.format(who=who)} ({len(rows)}): {handles}")
-                if status == "failed":
-                    sections.append(f"   last error: {html.escape(rows[-1][1][:120])}")
+                if status in ("failed", "dropped"):
+                    label = "last error" if status == "failed" else "why"
+                    sections.append(f"   {label}: {html.escape(rows[-1][1][:120])}")
         summary = " · ".join(f"{label} {totals[st]}" for st, label in STATUS_ICONS if totals.get(st))
         lines = [f"🏁 <b>Job #{job.batch_id} finished</b>", summary or "Nothing to do."]
         if sections:
@@ -191,6 +194,8 @@ class BotApp:
             total, left = total + n, left + pending
             parts = [f"{label} {counts[s]}" for s, label in STATUS_ICONS if counts.get(s)]
             name = f"@{html.escape(account.username)}" if account else "removed account"
+            if account and account.status == "removed":
+                name += " (removed)"
             platform = platform or (account.platform if account else None)
             waiting = "starting…"
             if pending and account and account.status in HELD:

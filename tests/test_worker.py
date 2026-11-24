@@ -5,7 +5,7 @@ import pytest
 from followbot.config import Limits, Settings
 from followbot.crypto import CookieVault, generate_key
 from followbot.db import Database
-from followbot.platforms import FollowResult, Outcome, RateLimited, SessionExpired, TransientError
+from followbot.platforms import ActionBlocked, FollowResult, Outcome, RateLimited, SessionExpired, TransientError
 from followbot.worker import Worker
 
 
@@ -169,6 +169,33 @@ async def test_missing_proxy_blocks_account(env):
     await worker.tick()
     assert (await db.get_account(acc)).status == "blocked"
     assert holder["adapter"].calls == []
+
+
+async def test_a_locked_or_suspended_account_leaves_the_work_list(env):
+    db, worker, clock, notes, holder, acc = env
+
+    class Suspended(FakeAdapter):
+        async def follow(self, handle):
+            raise ActionBlocked("X has suspended this account.")
+
+    holder["adapter"] = FakeAdapter({})
+    other = await db.upsert_account("x", "healthy", worker.vault.encrypt("x:healthy", {"ct0": "1"}), "UA", None)
+    job = await db.create_job(acc, 99, ["a", "b", "c"])
+    kept = await db.create_job(other, 99, ["a"])
+    holder["adapter"] = Suspended({})
+    await worker.process_one(await db.get_account(acc))
+
+    account = await db.get_account(acc)
+    assert account.status == "removed" and account.cookies_enc == ""
+    assert [a.username for a in await db.list_accounts()] == ["healthy"]  # gone from the panel and new jobs
+    assert await db.job_counts(job) == {"dropped": 3}
+    assert (await db.get_job(job)).status == "done"  # so its report goes out instead of waiting forever
+    assert await db.job_counts(kept) == {"pending": 1}  # other accounts carry on
+    assert notes.finished == [job] and "Add account" in notes.alerts[-1]
+
+    # Adding it again with fresh cookies brings it back.
+    await db.upsert_account("x", account.username, worker.vault.encrypt("x:me", {"ct0": "2"}), "UA", None)
+    assert (await db.get_account(acc)).status == "active"
 
 
 async def test_handle_followed_before_is_already_without_a_request(env):

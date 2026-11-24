@@ -132,7 +132,7 @@ async def test_a_failing_notifier_never_undoes_or_stops_follows(env):
     assert worker.notifier.calls >= 2
 
 
-async def test_a_locked_account_is_held_even_when_its_alert_cannot_be_sent(env):
+async def test_a_locked_account_is_removed_even_when_its_alert_cannot_be_sent(env):
     db, worker, clock, notes, holder, acc = env
     worker.notifier = Exploding()
 
@@ -141,8 +141,9 @@ async def test_a_locked_account_is_held_even_when_its_alert_cannot_be_sent(env):
             raise ActionBlocked("X has locked this account.")
 
     holder["adapter"] = Locked({})
-    await db.create_job(acc, 99, ["a"])
+    job = await db.create_job(acc, 99, ["a", "b"])
     await worker.tick()
     account = await db.get_account(acc)
-    assert account.status == "blocked" and "locked" in account.pause_reason
-    assert await db.pending_count(acc) == 1  # kept for when you unlock it and tap Resume all
+    assert account.status == "removed" and "locked" in account.pause_reason
+    assert await db.pending_count(acc) == 0
+    assert await db.job_counts(job) == {"dropped": 2}

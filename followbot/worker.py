@@ -229,10 +229,15 @@ class Worker:
                               who=name)
             return
         except ActionBlocked as exc:
+            # Locked, suspended or challenged: it can't follow until a human fixes it, so it leaves
+            # the work list instead of holding its queue (and every job card) hostage.
             await self.forget(account.id)
-            await self.db.set_account_state(account.id, status="blocked", pause_reason=exc.detail)
-            await self._alert(f"⛔ {name}: {exc.detail} Then tap Resume all.",
-                              group=f"⛔ {exc.detail} Then tap Resume all.", who=name)
+            jobs = await self.db.remove_account(account.id, exc.detail)
+            fix = ("Removed from your accounts and its queued follows dropped. "
+                   "Once it's fixed, tap Add account with fresh cookies to use it again.")
+            await self._alert(f"🗑 {name}: {exc.detail} {fix}", group=f"🗑 {exc.detail} {fix}", who=name)
+            for job_id in jobs:
+                await self._after_task(job_id)
             return
         except RateLimited as exc:
             until = now + exc.retry_after
