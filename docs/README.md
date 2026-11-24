@@ -19,7 +19,7 @@ It runs **on this machine** in Docker. X and Instagram traffic goes out through 
 
 - **Connect accounts with cookies.** You tap **Add account**, choose X or Instagram, then send the JSON export from your cookie extension. The bot deletes your message, checks the session through the VPN, and stores the cookies encrypted (AES-256-GCM). It never uses passwords or the paid official APIs.
 - **Follow one account or a list.** `/follow` takes handles, `@handles`, profile links, or a `.txt`/`.csv` file. You see a preview first (duplicates, invalid entries, ETA, daily-cap warning), then press **Start**. Progress shows up live, and a final report lists anything that failed.
-- **Pacing.** Each account gets at most **13 follows per 10 minutes** (single follows count too), with random 35–65 s gaps (about 12 in a typical 10 minutes), plus a daily cap (X 200, Instagram 100). Accounts you already follow are skipped without spending budget.
+- **Pacing.** Each account gets at most **13 follows per 10 minutes** (single follows count too), with random 35–65 s gaps (about 12 in a typical 10 minutes), plus a daily cap of 200 on both X and Instagram. Accounts you already follow are skipped without spending budget.
 - **Safety stops:**
   - **Rate limited:** the account pauses for hours and then resumes on its own.
   - **Session expired:** the queue is held until you reconnect.
