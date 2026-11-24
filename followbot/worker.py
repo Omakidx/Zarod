@@ -98,21 +98,24 @@ async def spread_locations(db, settings: Settings) -> list[tuple]:
             where[a.id] = best(accounts, names, a.platform)
 
     def even_out(group: list, pool: list[str], by_platform: bool) -> None:
+        """Move accounts off locations above the even share, only ever onto one below it, so it ends."""
         subgroups = [[a for a in group if a.platform == p] for p in sorted({a.platform for a in group})] \
             if by_platform else [group]
         for sub in subgroups:
             target = -(-len(sub) // len(pool))  # ceil
-            while True:
+            for _ in range(len(sub) * len(pool) + 1):  # hard stop, whatever happens
                 counts = load(sub)
                 crowded = [n for n in pool if counts[n] > target]
-                if not crowded:
+                room = [n for n in pool if counts[n] < target]
+                if not crowded or not room:
                     break
                 here = [a for a in sub if where[a.id] == crowded[0]]
                 if by_platform:
                     mover = max(here, key=lambda a: a.id)  # the newest
                 else:  # the one whose platform is most crowded here, then the newest
                     mover = max(here, key=lambda a: (load(group, a.platform)[crowded[0]], a.id))
-                where[mover.id] = best(group, pool, mover.platform, exclude=crowded[0])
+                mine, total = load(group, mover.platform), load(group)
+                where[mover.id] = min(room, key=lambda n: (mine[n], total[n], pool.index(n)))
 
     for country in sorted({location_country(settings, n) for n in names}):
         pool = [n for n in names if location_country(settings, n) == country]
