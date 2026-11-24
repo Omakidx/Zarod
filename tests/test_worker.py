@@ -365,3 +365,36 @@ async def test_accounts_are_spread_evenly_over_new_locations(tmp_path):
         assert await spread_locations(db, settings) == []  # stable: nothing moves on the next start
     finally:
         await db.close()
+
+
+async def test_spreading_stays_in_country_and_fits_three_per_ip(tmp_path):
+    from collections import Counter
+
+    from followbot.worker import pick_location, spread_locations
+
+    db = await Database.open(str(tmp_path / "world.db"))
+    ash = ["main"] + [f"ash{i}" for i in range(2, 21)]
+    us_cities = [f"us-{c}1" for c in ("nyc", "chi", "dal", "lax", "mia", "sea", "atl", "den", "phx", "bos")]
+    world = [f"{c}1" for c in ("gb-gla", "de-ber", "fr-bod", "nl-ams", "ca-van", "au-adl", "jp-tok", "sg-sng",
+                               "br-sao", "es-bcn")]
+    names = ash + us_cities + world
+    settings = Settings(
+        bot_token="t", owner_id=1, encryption_key=b"0" * 32, db_path="", require_proxy=True, user_agent="ua",
+        proxies={n: f"http://vpn:{8881 + i}" for i, n in enumerate(names)}, limits=Limits(),
+        location_country={**{n: "US" for n in ash + us_cities}, **{n: n[:2].upper() for n in world}},
+    )
+    try:
+        for i in range(51):  # today: 81 accounts on the 20 Ashburn locations, up to 5 each
+            await db.upsert_account("x", f"x{i}", "c", "ua", ash[i % 20])
+        for i in range(30):
+            await db.upsert_account("instagram", f"ig{i}", "c", "ua", ash[i % 20])
+        moves = await spread_locations(db, settings)
+        accounts = await db.list_accounts()
+        assert max(Counter(a.proxy_name for a in accounts).values()) <= 3
+        assert all(a.proxy_name in ash + us_cities for a in accounts)  # nobody was moved abroad
+        assert all(loc in us_cities or loc in ash for _, loc in moves)
+        assert await spread_locations(db, settings) == []
+        # A new account gets an unused location, abroad if those are the free ones.
+        assert pick_location(settings, accounts) == "gb-gla1"
+    finally:
+        await db.close()

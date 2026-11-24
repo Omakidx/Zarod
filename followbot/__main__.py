@@ -65,8 +65,10 @@ async def run_bot() -> None:
         # Worker adapters are built after this, so moved accounts start on their new IP.
         per_ip = max(Counter(a.proxy_name for a in await db.list_accounts()).values())
         names = ", ".join(f"@{a.username}→{loc}" for a, loc in moves[:20]) + (f", … +{len(moves) - 20}" if len(moves) > 20 else "")
-        await report(f"🌍 Spread accounts over {len(settings.proxies)} VPN locations: moved {len(moves)} "
-                     f"({names}). Now at most {per_ip} accounts share an IP.")
+        over = (f" That's over the limit of {settings.max_per_ip}: add more VPN locations."
+                if per_ip > settings.max_per_ip else "")
+        await report(f"🌍 Spread accounts over {len(settings.proxies)} VPN locations (moves stay in-country): "
+                     f"moved {len(moves)} ({names}). Now at most {per_ip} accounts share an IP.{over}")
     await import_cookie_files(settings, db, vault, worker, report)
     outbox_task = asyncio.create_task(outbox.run(), name="outbox")
     worker_task = asyncio.create_task(worker.run(), name="follow-worker")

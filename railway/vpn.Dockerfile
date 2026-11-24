@@ -15,5 +15,6 @@ RUN apk add --no-cache ca-certificates curl \
  && adduser -D -u 10001 vpn
 
 COPY railway/vpn-start.sh /usr/local/bin/vpn-start
+COPY railway/vpn-locations.txt /usr/local/share/vpn-locations.txt
 USER vpn
 CMD ["/bin/sh", "/usr/local/bin/vpn-start"]

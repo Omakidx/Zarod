@@ -160,3 +160,25 @@ def test_proxies_range_and_extra():
     settings = load_settings(env)
     assert list(settings.proxies)[:2] == ["main", "ash6"] and len(settings.proxies) == 16
     assert settings.proxies["ash20"] == "http://vpn:8900"
+
+
+def test_locations_file_builds_every_proxy(tmp_path):
+    from followbot.config import load_settings
+
+    f = tmp_path / "locs.txt"
+    f.write_text("# comment\nmain US 1.2.3.4 KEY # Ashburn\nash2 US 1.2.3.5 KEY\nde-ber1 de 5.6.7.8 KEY2 # Berlin\n")
+    env = {"TELEGRAM_BOT_TOKEN": "t", "OWNER_TELEGRAM_ID": "1", "ENCRYPTION_KEY": "A" * 43 + "=",
+           "VPN_LOCATIONS_FILE": str(f), "VPN_PROXY_BASE": "http://bot:pw@vpn.railway.internal/"}
+    s = load_settings(env)
+    assert s.proxies == {"main": "http://bot:pw@vpn.railway.internal:8881",
+                         "ash2": "http://bot:pw@vpn.railway.internal:8882",
+                         "de-ber1": "http://bot:pw@vpn.railway.internal:8883"}
+    assert s.location_country == {"main": "US", "ash2": "US", "de-ber1": "DE"} and s.max_per_ip == 3
+
+
+def test_the_real_locations_file_parses():
+    from followbot.config import LOCATIONS_FILE, load_locations
+
+    locations = load_locations(LOCATIONS_FILE)
+    assert len(locations) == 40 and locations[0] == ("main", "US") and locations[19] == ("ash20", "US")
+    assert len({n for n, _ in locations}) == 40  # names are unique

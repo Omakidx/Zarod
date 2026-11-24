@@ -54,10 +54,10 @@ class ProxyMissing(Exception):
 
 
 def pick_location(settings: Settings, accounts: list, exclude: tuple | list = ()) -> str | None:
-    """A VPN location for a new account: the first one no account uses yet, else the least used.
+    """A VPN location for a new account: the least used one (an unused one if there is any).
 
-    Each location is one Ashburn server with its own exit IP, so accounts don't share an IP
-    until there are more accounts than locations.
+    Each location is one Surfshark server with its own exit IP, so accounts don't share an IP until
+    there are more accounts than locations.
     """
     names = [name for name in settings.proxies if name not in exclude]
     if not names:
@@ -66,12 +66,18 @@ def pick_location(settings: Settings, accounts: list, exclude: tuple | list = ()
     return min(names, key=lambda name: (used[name], names.index(name)))
 
 
+def location_country(settings: Settings, name: str | None) -> str:
+    return settings.location_country.get(name or "", "?")
+
+
 async def spread_locations(db, settings: Settings) -> list[tuple]:
     """Spread accounts evenly over the VPN locations, so as few as possible share an IP.
 
-    Accounts with a missing location get one; then each platform's accounts are evened out (so no IP
-    carries a pile of X accounts), then the totals. The newest account on a crowded location is the
-    one that moves; the rest keep their IP. Returns (account, new location) for each account moved.
+    An account only moves to another location in the same country (a jump abroad invites "is this
+    you?" checks). Accounts with a missing location get the least-used one anywhere. Within a country,
+    each platform's accounts are evened out first (so no IP carries a pile of X accounts), then the
+    totals. The newest account on a crowded location is the one that moves; the rest keep their IP.
+    Returns (account, new location) for each account moved.
     """
     names = list(settings.proxies)
     if not names:
@@ -80,38 +86,40 @@ async def spread_locations(db, settings: Settings) -> list[tuple]:
     where = {a.id: a.proxy_name for a in accounts}
     original = dict(where)
 
-    def load(platform: str | None = None) -> Counter:
-        return Counter(where[a.id] for a in accounts if platform is None or a.platform == platform)
+    def load(group: list, platform: str | None = None) -> Counter:
+        return Counter(where[a.id] for a in group if platform is None or a.platform == platform)
 
-    def best(platform: str, exclude: str | None = None) -> str:
-        mine, total = load(platform), load()
-        return min((n for n in names if n != exclude), key=lambda n: (mine[n], total[n], names.index(n)))
+    def best(group: list, pool: list[str], platform: str, exclude: str | None = None) -> str:
+        mine, total = load(group, platform), load(group)
+        return min((n for n in pool if n != exclude), key=lambda n: (mine[n], total[n], pool.index(n)))
 
-    for a in accounts:  # no location, or one that's no longer configured
+    for a in accounts:  # no location, or one that's no longer configured: the least used anywhere
         if where[a.id] not in settings.proxies:
-            where[a.id] = best(a.platform)
+            where[a.id] = best(accounts, names, a.platform)
 
-    def even_out(group: list) -> None:
-        target = -(-len(group) // len(names))  # ceil
-        while True:
-            counts = Counter(where[a.id] for a in group)
-            crowded = [n for n in names if counts[n] > target]
-            if not crowded:
-                return
-            mover = max((a for a in group if where[a.id] == crowded[0]), key=lambda a: a.id)  # the newest
-            where[mover.id] = best(mover.platform, exclude=crowded[0])
+    def even_out(group: list, pool: list[str], by_platform: bool) -> None:
+        subgroups = [[a for a in group if a.platform == p] for p in sorted({a.platform for a in group})] \
+            if by_platform else [group]
+        for sub in subgroups:
+            target = -(-len(sub) // len(pool))  # ceil
+            while True:
+                counts = load(sub)
+                crowded = [n for n in pool if counts[n] > target]
+                if not crowded:
+                    break
+                here = [a for a in sub if where[a.id] == crowded[0]]
+                if by_platform:
+                    mover = max(here, key=lambda a: a.id)  # the newest
+                else:  # the one whose platform is most crowded here, then the newest
+                    mover = max(here, key=lambda a: (load(group, a.platform)[crowded[0]], a.id))
+                where[mover.id] = best(group, pool, mover.platform, exclude=crowded[0])
 
-    for platform in sorted({a.platform for a in accounts}):
-        even_out([a for a in accounts if a.platform == platform])
-    target = -(-len(accounts) // len(names))
-    while True:  # then the totals, moving an account whose platform is most crowded where it is
-        total = load()
-        crowded = [n for n in names if total[n] > target]
-        if not crowded:
-            break
-        here = [a for a in accounts if where[a.id] == crowded[0]]
-        mover = max(here, key=lambda a: (load(a.platform)[crowded[0]], a.id))
-        where[mover.id] = best(mover.platform, exclude=crowded[0])
+    for country in sorted({location_country(settings, n) for n in names}):
+        pool = [n for n in names if location_country(settings, n) == country]
+        group = [a for a in accounts if location_country(settings, where[a.id]) == country]
+        if group and len(pool) > 1:
+            even_out(group, pool, by_platform=True)
+            even_out(group, pool, by_platform=False)
 
     moves = []
     for a in accounts:

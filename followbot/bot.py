@@ -442,6 +442,11 @@ class BotApp:
         saved = await self.db.get_account(account_id)
         location = saved.proxy_name if saved else location
         where = f" via 🌍 {html.escape(location)}" if location else ""
+        sharing = sum(a.proxy_name == location for a in await self.db.list_accounts()) if location else 0
+        if sharing > self.settings.max_per_ip:
+            where += (f".\n⚠️ Every VPN location already has {self.settings.max_per_ip} accounts, so this one "
+                      f"shares its IP with {sharing - 1} others. Add more VPN locations to keep it at "
+                      f"{self.settings.max_per_ip}")
         # Stay on this step: the next paste is another account, on the next free location.
         next_location = pick_location(self.settings, await self.db.list_accounts())
         await state.update_data(location=next_location)

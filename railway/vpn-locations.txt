@@ -1,0 +1,46 @@
+# VPN locations: one Surfshark WireGuard tunnel each, in port order (line 1 = port 8881, line 2 = 8882, ...).
+# APPEND ONLY: an account keeps its location name, so reordering would move accounts to other IPs.
+# name  country  server_ip  server_public_key  (city)
+# Servers and keys come from Surfshark's public list (api.surfshark.com/v4/server/clusters/generic)
+# and its DNS (e.g. dig us-nyc.prod.surfshark.com). Each was tested from the vpn service before being added.
+# Spares that also tested fine: us-hou1, us-sfo1, it-rom1, in-mum1.
+main US 45.144.115.26 9ef2f8mXHnAxx06lx4OxhtzASfJgv6YfEimuVyef6QE= # Ashburn
+ash2 US 45.144.115.34 9ef2f8mXHnAxx06lx4OxhtzASfJgv6YfEimuVyef6QE= # Ashburn
+ash3 US 151.240.254.12 9ef2f8mXHnAxx06lx4OxhtzASfJgv6YfEimuVyef6QE= # Ashburn
+ash4 US 149.102.227.103 9ef2f8mXHnAxx06lx4OxhtzASfJgv6YfEimuVyef6QE= # Ashburn
+ash5 US 185.156.46.102 9ef2f8mXHnAxx06lx4OxhtzASfJgv6YfEimuVyef6QE= # Ashburn
+ash6 US 37.19.206.39 9ef2f8mXHnAxx06lx4OxhtzASfJgv6YfEimuVyef6QE= # Ashburn
+ash7 US 37.19.220.194 9ef2f8mXHnAxx06lx4OxhtzASfJgv6YfEimuVyef6QE= # Ashburn
+ash8 US 45.144.115.3 9ef2f8mXHnAxx06lx4OxhtzASfJgv6YfEimuVyef6QE= # Ashburn
+ash9 US 45.144.115.138 9ef2f8mXHnAxx06lx4OxhtzASfJgv6YfEimuVyef6QE= # Ashburn
+ash10 US 45.144.115.217 9ef2f8mXHnAxx06lx4OxhtzASfJgv6YfEimuVyef6QE= # Ashburn
+ash11 US 149.102.227.98 9ef2f8mXHnAxx06lx4OxhtzASfJgv6YfEimuVyef6QE= # Ashburn
+ash12 US 149.102.227.113 9ef2f8mXHnAxx06lx4OxhtzASfJgv6YfEimuVyef6QE= # Ashburn
+ash13 US 151.240.254.5 9ef2f8mXHnAxx06lx4OxhtzASfJgv6YfEimuVyef6QE= # Ashburn
+ash14 US 151.240.254.25 9ef2f8mXHnAxx06lx4OxhtzASfJgv6YfEimuVyef6QE= # Ashburn
+ash15 US 151.240.254.45 9ef2f8mXHnAxx06lx4OxhtzASfJgv6YfEimuVyef6QE= # Ashburn
+ash16 US 185.156.46.97 9ef2f8mXHnAxx06lx4OxhtzASfJgv6YfEimuVyef6QE= # Ashburn
+ash17 US 185.156.46.117 9ef2f8mXHnAxx06lx4OxhtzASfJgv6YfEimuVyef6QE= # Ashburn
+ash18 US 37.19.206.46 9ef2f8mXHnAxx06lx4OxhtzASfJgv6YfEimuVyef6QE= # Ashburn
+ash19 US 37.19.220.199 9ef2f8mXHnAxx06lx4OxhtzASfJgv6YfEimuVyef6QE= # Ashburn
+ash20 US 45.144.115.195 9ef2f8mXHnAxx06lx4OxhtzASfJgv6YfEimuVyef6QE= # Ashburn
+us-nyc1 US 185.149.195.100 rhuoCmHdyYrh0zW3J0YXZK4aN3It7DD26TXlACuWnwU= # New York
+us-chi1 US 138.199.42.155 DpMfulanF/MVHmt3AX4dqLqcyE0dpPqYBjDlWMaUI00= # Chicago
+us-dal1 US 2.56.189.184 0iwHQpV+rsOg38ogv4g4XMLJa51YqWY/yKWR9UEUMDk= # Dallas
+us-lax1 US 45.149.173.192 m+L7BVQWDwU2TxjfspMRLkRctvmo7fOkd+eVk6KC5lM= # Los Angeles
+us-mia1 US 89.38.227.189 KvJ/jtWb8BsBI85OcZnOIJu9kfh12mCMR4cejWFpDCc= # Miami
+us-sea1 US 84.17.41.77 SpMH/p90bg9ZAG6V2DWJQ9csWPVnKcDVppIp9Xul5G8= # Seattle
+us-atl1 US 92.119.19.52 SgciXll6wGQhcyxPUdp0V0z6WwN9P3fqDoeh3N3xNjc= # Atlanta
+us-den1 US 212.102.44.109 AnRLZKBwCfuGFZfoa3dsdjpcpvgFsQhASmjHXhIJLgM= # Denver
+us-phx1 US 172.216.11.12 HDCyeD2+lw6KHVMu7Opkt4V4ikYZHzQNWmwklBMb4Ac= # Phoenix
+us-bos1 US 43.225.189.106 V0vpMcp0/586Y/q1EzW9PhM45JhypnCYgmrP0rzDEVw= # Boston
+gb-gla1 GB 89.37.66.99 QiFHJ7wtwhXEztRqBjGrFphsFXtlAFWwMDgruFKq0XE= # Glasgow
+de-ber1 DE 193.176.86.93 d3ldwEjnFcbLwD1o8uC5xC3DaSNek8DGeTpOb/h/IE4= # Berlin
+fr-bod1 FR 195.86.24.100 ArE5eVIEOPellzFlGK/oOcHCGnB+AAv0Un4C100COmw= # Bordeaux
+nl-ams1 NL 146.70.175.69 Lxg3jAOKcBA9tGBtB6vEWMFl5LUEB6AwOpuniYn1cig= # Amsterdam
+ca-van1 CA 216.246.31.17 o4HezxSsbNqJFJZj+VBw/QXFLpfNo7PZu8xe7H2hTw0= # Vancouver
+au-adl1 AU 103.214.20.195 J7N3UrHc71+LJkn8gsI9Ja8YcpTXT8fV789LLKnIXAY= # Adelaide
+jp-tok1 JP 193.148.16.99 YJSjrc/WWOjQUyUi4iYcHb7LsWWoCY+2fK8/8VtC/BY= # Tokyo
+sg-sng1 SG 89.187.163.212 MGfgkhJsMVMTO33h1wr76+z6gQr/93VcGdClfbaPsnU= # Singapore
+br-sao1 BR 138.199.58.37 IFTVXxhLEqVgZI/JGOPRtmrNUQW1DNljeBe8Ys7v90A= # Sao Paulo
+es-bcn1 ES 95.177.101.137 3EC6079YDlzJKcNLdrm/t+JLG8hV3wPpoWE4MypjYnw= # Barcelona

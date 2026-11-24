@@ -5,6 +5,7 @@ from __future__ import annotations
 import base64
 import os
 import re
+from pathlib import Path
 from dataclasses import dataclass, field
 
 PLATFORMS = ("x", "instagram")
@@ -49,9 +50,34 @@ class Settings:
     import_location: str | None = None
     # platform -> user agent, when cookies for that platform come from a different browser
     user_agents: dict[str, str] = field(default_factory=dict)
+    # VPN location -> country code (from railway/vpn-locations.txt). An account only moves between
+    # locations in the same country: a sudden jump abroad is what makes X and Instagram ask "is this you?".
+    location_country: dict[str, str] = field(default_factory=dict)
+    # At most this many accounts share one VPN location (one exit IP).
+    max_per_ip: int = 3
 
     def user_agent_for(self, platform: str) -> str:
         return self.user_agents.get(platform) or self.user_agent
+
+
+LOCATIONS_FILE = Path(__file__).resolve().parent.parent / "railway" / "vpn-locations.txt"
+FIRST_PORT = 8881
+
+
+def load_locations(path: str | Path) -> list[tuple[str, str]]:
+    """(name, country) per line of vpn-locations.txt, in port order (line 1 is port 8881)."""
+    try:
+        text = Path(path).read_text()
+    except FileNotFoundError:
+        return []
+    out = []
+    for line in text.splitlines():
+        parts = line.split("#", 1)[0].split()
+        if parts:
+            if len(parts) < 4:
+                raise ConfigError(f"{path}: a line must be 'name country server_ip public_key', got {line!r}")
+            out.append((parts[0], parts[1].upper()))
+    return out
 
 
 _RANGE = re.compile(r"^([A-Za-z_]*?)(\d+)-\1(\d+)$")
@@ -128,8 +154,14 @@ def load_settings(env: dict[str, str] | None = None) -> Settings:
     if limits.gap_min > limits.gap_max:
         raise ConfigError("GAP_MIN_SECONDS must not exceed GAP_MAX_SECONDS")
 
-    # PROXIES_EXTRA adds locations without touching PROXIES (handy for a range of new tunnels).
-    proxies = {**_parse_proxies(env.get("PROXIES", "")), **_parse_proxies(env.get("PROXIES_EXTRA", ""))}
+    # Every location in vpn-locations.txt, when VPN_PROXY_BASE says how to reach the vpn service
+    # (e.g. http://bot:PASS@vpn.railway.internal; location N is on port 8880+N). PROXIES and
+    # PROXIES_EXTRA can still add or override single locations.
+    locations = load_locations(env.get("VPN_LOCATIONS_FILE") or LOCATIONS_FILE)
+    base = env.get("VPN_PROXY_BASE", "").strip().rstrip("/")
+    proxies = {name: f"{base}:{FIRST_PORT + i}" for i, (name, _) in enumerate(locations)} if base else {}
+    proxies.update(_parse_proxies(env.get("PROXIES", "")))
+    proxies.update(_parse_proxies(env.get("PROXIES_EXTRA", "")))
     require_proxy = env.get("REQUIRE_PROXY", "true").strip().lower() not in ("0", "false", "no")
     if require_proxy and not proxies:
         raise ConfigError("REQUIRE_PROXY is on but PROXIES is empty")
@@ -163,4 +195,6 @@ def load_settings(env: dict[str, str] | None = None) -> Settings:
         cookie_files=cookie_files,
         import_location=import_location,
         user_agents=user_agents,
+        location_country=dict(locations),
+        max_per_ip=_int(env, "MAX_ACCOUNTS_PER_IP", 3),
     )
