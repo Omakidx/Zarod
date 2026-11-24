@@ -13,6 +13,8 @@ One Railway project, two services from this repo. Both redeploy on every push to
 | `vpn` | `railway/vpn.Dockerfile` | `RAILWAY_DOCKERFILE_PATH`, `SURFSHARK_WG_PRIVATE_KEY`, `VPN_PROXY_PASSWORD` (optional: `VPN_ENDPOINT_IPS`, `VPN_SERVER_PUBKEY`, `VPN_MTU`) |
 | `bot` | root `Dockerfile` | the ones below. Volume mounted at `/data` |
 
+The `vpn` service has the watch path `/railway/**` (Settings → Build → Watch Paths), so it only rebuilds when its own files change. Without it, every push restarted the tunnels and briefly cut the bot's accounts off.
+
 `vpn` variables:
 
 ```
