@@ -36,8 +36,8 @@ COMMANDS = [BotCommand(command="start", description="Show the menu")]
 PLATFORM_ICONS = {"x": "x", "instagram": "instagram"}
 
 # Each account in a batch starts at a random moment within this many seconds, so many accounts
-# don't start (and then keep following) in lockstep.
-START_SPREAD_SECONDS = 600
+# don't start (and then keep following) in lockstep. X jobs start right away (within half a minute).
+START_SPREAD_SECONDS = {"x": 30, "instagram": 600}
 
 STATUS_ICONS = [
     ("followed", "✅ followed"),
@@ -246,7 +246,7 @@ class BotApp:
             # Too many accounts for a line each (Telegram would refuse the edit): totals instead.
             text = head + "\n" + await self._batch_summary(jobs)
         if left:
-            gaps = self.settings.limits
+            gaps = self.settings.limits.for_platform(platform or "")
             text += f"\n⏳ {left} left · one every {gaps.gap_min:.0f}–{gaps.gap_max:.0f} s per account"
         try:
             await self.bot.edit_message_text(text, chat_id=job.chat_id, message_id=job.message_id)
@@ -284,15 +284,16 @@ class BotApp:
     async def cmd_start(self, message: Message, state: FSMContext) -> None:
         await state.clear()
         limits = self.settings.limits
+        x, ig = limits.for_platform("x"), limits.for_platform("instagram")
         await message.answer(
             "👋 <b>Follow bot</b>\n\n"
             "➕ <b>Follow accounts</b>: send handles, @handles, profile links, or a .txt/.csv file\n"
             "🔗 <b>Add account</b>: connect another X or Instagram account with its cookie JSON\n"
             "👥 <b>My accounts</b>: pause or remove an account\n"
             "🗂 <b>Queue</b>: what's waiting and when the next follow goes out\n\n"
-            f"Limits: {limits.window_limit} follows per {limits.window_seconds // 60} min per account, "
-            f"spaced randomly, plus a daily cap (X {limits.daily_limit['x']}, "
-            f"Instagram {limits.daily_limit['instagram']}).",
+            f"Limits per account: X {x.window_limit} follows per {x.window_seconds // 60} min, "
+            f"Instagram {ig.window_limit} per {ig.window_seconds // 60} min, spaced randomly, "
+            f"plus a daily cap (X {limits.daily_limit['x']}, Instagram {limits.daily_limit['instagram']}).",
             reply_markup=ui.main_menu(),
         )
 
@@ -570,7 +571,7 @@ class BotApp:
             await message.answer(f"All {len(already)} are already queued. The job card shows their progress.")
             return
 
-        limits = self.settings.limits
+        limits = self.settings.limits.for_platform(platform)
         # Accounts run side by side, so the slowest one (longest queue) sets the time.
         longest, over_cap, warming = 0, [], 0
         for account in accounts:
@@ -658,7 +659,7 @@ class BotApp:
             batch_id = batch_id or job_id
             await self.db.set_job_message(job_id, query.message.message_id)
             if i:
-                start = now + random.uniform(0, START_SPREAD_SECONDS)
+                start = now + random.uniform(0, START_SPREAD_SECONDS.get(account.platform, 600))
                 await self.db.set_account_state(account.id, next_action_at=max(account.next_action_at, start))
         if batch_id is None:
             await query.message.edit_text("All of these are already queued.")

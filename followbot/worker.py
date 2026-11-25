@@ -199,7 +199,7 @@ class Worker:
         if account.status != "active":
             return float("inf")
         now = self.clock()
-        limits = self.settings.limits
+        limits = self.settings.limits.for_platform(account.platform)
         daily, hourly = account_caps(self.settings, account, now)
         return next_allowed_at(
             await self.db.action_times(account.id, now - DAY),
@@ -325,7 +325,8 @@ class Worker:
         await self.db.finish_task(task.id, result.outcome.value, result.detail)
         if result.action_sent:
             await self.db.record_action(account.id, now)
-            gap = random_gap(self.settings.limits.gap_min, self.settings.limits.gap_max, self.rng)
+            pace = self.settings.limits.for_platform(account.platform)
+            gap = random_gap(pace.gap_min, pace.gap_max, self.rng)
             _, hourly = account_caps(self.settings, account, now)
             if hourly:
                 # Warming up: spread the hour's follows over the hour instead of bunching them.

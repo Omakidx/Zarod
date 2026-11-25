@@ -1,3 +1,4 @@
+from dataclasses import replace
 import base64
 
 import pytest
@@ -278,6 +279,27 @@ async def test_accounts_left_blocked_from_before_are_removed_but_vpn_ones_stay(e
     assert (await db.get_account(vpn)).status == "blocked"
     assert await db.job_counts(job) == {"dropped": 2} and notes.finished == [job]
     assert await worker.remove_blocked_leftovers() == 0  # nothing left to do on the next start
+
+
+def test_x_has_its_own_pace_and_no_warmup():
+    from followbot.config import load_settings
+    import base64, os
+    s = load_settings({"TELEGRAM_BOT_TOKEN": "t", "OWNER_TELEGRAM_ID": "1",
+                       "ENCRYPTION_KEY": base64.urlsafe_b64encode(os.urandom(32)).decode(), "REQUIRE_PROXY": "false"})
+    x, ig = s.limits.for_platform("x"), s.limits.for_platform("instagram")
+    assert (x.window_limit, x.window_seconds, x.gap_min, x.gap_max) == (10, 360, 25, 40)
+    assert (ig.window_limit, ig.window_seconds, ig.gap_min, ig.gap_max) == (13, 600, 35, 65)
+    assert s.limits.warmup_start["x"] == 0
+
+
+async def test_x_pace_allows_10_follows_in_6_minutes(env):
+    db, worker, clock, notes, holder, acc = env
+    from followbot.ratelimit import next_allowed_at
+    lim = replace(worker.settings.limits, pace={"x": {"window_limit": 10, "window_seconds": 360}}).for_platform("x")
+    times = [1000 + 30 * i for i in range(10)]
+    ready = next_allowed_at(times, 1300, window_limit=lim.window_limit, window_seconds=lim.window_seconds,
+                            daily_limit=200)
+    assert ready == 1000 + 360  # the 11th waits until the first falls out of the 6-minute window
 
 
 async def test_jobs_left_open_with_nothing_to_do_are_finished_on_start(env):
