@@ -6,7 +6,7 @@ import base64
 import os
 import re
 from pathlib import Path
-from dataclasses import dataclass, field, replace
+from dataclasses import dataclass, field
 
 PLATFORMS = ("x", "instagram")
 PLATFORM_NAMES = {"x": "X", "instagram": "Instagram"}
@@ -31,20 +31,7 @@ class Limits:
     max_attempts: int = 3
     # Warm-up: an account's daily cap on its first day in the bot, doubling each day up to
     # daily_limit. 0 turns it off. X locked brand-new accounts after ~35 follows in their first hour.
-    warmup_start: dict[str, int] = field(default_factory=lambda: {"x": 0, "instagram": 0})
-    # Per-platform pace overrides (window_limit, window_seconds, gap_min, gap_max) on top of the above.
-    # load_settings gives X 10 per 6 min with 25-40 s gaps (WINDOW_LIMIT_X etc.).
-    pace: dict[str, dict[str, float]] = field(default_factory=dict)
-
-    def for_platform(self, platform: str) -> "Limits":
-        """These limits with that platform's pace overrides applied."""
-        extra = self.pace.get(platform)
-        if not extra:
-            return self
-        return replace(self, window_limit=int(extra.get("window_limit", self.window_limit)),
-                       window_seconds=int(extra.get("window_seconds", self.window_seconds)),
-                       gap_min=float(extra.get("gap_min", self.gap_min)),
-                       gap_max=float(extra.get("gap_max", self.gap_max)))
+    warmup_start: dict[str, int] = field(default_factory=lambda: {"x": 20, "instagram": 0})
 
 
 @dataclass(frozen=True)
@@ -160,20 +147,12 @@ def load_settings(env: dict[str, str] | None = None) -> Settings:
         gap_min=_float(env, "GAP_MIN_SECONDS", 35),
         gap_max=_float(env, "GAP_MAX_SECONDS", 65),
         warmup_start={
-            "x": _int(env, "WARMUP_START_X", 0),
+            "x": _int(env, "WARMUP_START_X", 20),
             "instagram": _int(env, "WARMUP_START_INSTAGRAM", 0),
         },
     )
-    limits = replace(limits, pace={"x": {
-        "window_limit": _int(env, "WINDOW_LIMIT_X", 10),
-        "window_seconds": _int(env, "WINDOW_SECONDS_X", 360),
-        "gap_min": _float(env, "GAP_MIN_SECONDS_X", 25),
-        "gap_max": _float(env, "GAP_MAX_SECONDS_X", 40),
-    }})
-    for platform in ("x", "instagram"):
-        own = limits.for_platform(platform)
-        if own.gap_min > own.gap_max:
-            raise ConfigError("GAP_MIN_SECONDS must not exceed GAP_MAX_SECONDS (also the _X ones)")
+    if limits.gap_min > limits.gap_max:
+        raise ConfigError("GAP_MIN_SECONDS must not exceed GAP_MAX_SECONDS")
 
     # Every location in vpn-locations.txt, when VPN_PROXY_BASE says how to reach the vpn service
     # (e.g. http://bot:PASS@vpn.railway.internal; location N is on port 8880+N). PROXIES and

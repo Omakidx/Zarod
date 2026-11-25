@@ -141,7 +141,7 @@ async def test_accounts_follow_the_list_in_their_own_order_and_start_spread_out(
         orders.add(tuple(seen))
     assert len(orders) == 6  # 30 handles: six identical shuffles would be astronomically unlikely
     starts = [(await db.get_account(a)).next_action_at for a in others]
-    assert all(before <= t <= before + START_SPREAD_SECONDS["x"] + 1 for t in starts)  # X starts within 30 s
+    assert all(before <= t <= before + START_SPREAD_SECONDS + 1 for t in starts)
 
 
 async def test_paused_account_is_shown_on_preview_and_card_until_resumed(env):
