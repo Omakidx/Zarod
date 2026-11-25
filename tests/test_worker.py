@@ -280,6 +280,19 @@ async def test_accounts_left_blocked_from_before_are_removed_but_vpn_ones_stay(e
     assert await worker.remove_blocked_leftovers() == 0  # nothing left to do on the next start
 
 
+async def test_jobs_left_open_with_nothing_to_do_are_finished_on_start(env):
+    db, worker, clock, notes, holder, acc = env
+    stale = await db.create_job(acc, 99, ["a", "b"])
+    busy = await db.create_job(acc, 99, ["c"])
+    # Its follows were dropped but the bot restarted before the job was closed.
+    await db.conn.execute("UPDATE tasks SET status = 'dropped' WHERE job_id = ?", (stale,))
+    await db.conn.commit()
+    assert await worker.finish_stale_jobs() == 1
+    assert (await db.get_job(stale)).status == "done" and notes.finished == [stale]
+    assert (await db.get_job(busy)).status == "queued"
+    assert await worker.finish_stale_jobs() == 0
+
+
 async def test_handle_followed_before_is_already_without_a_request(env):
     db, worker, clock, notes, holder, acc = env
     holder["adapter"] = FakeAdapter({})

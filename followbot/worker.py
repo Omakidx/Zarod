@@ -352,6 +352,14 @@ class Worker:
             removed += 1
         return removed
 
+    async def finish_stale_jobs(self) -> int:
+        """Close jobs left open with no follows to do (e.g. the bot restarted mid-removal) so their
+        reports go out. Returns how many were closed."""
+        jobs = await self.db.open_jobs_without_work()
+        for job_id in jobs:
+            await self._after_task(job_id)
+        return len(jobs)
+
     async def _remove(self, account: Account, why: str) -> None:
         await self.forget(account.id)
         jobs = await self.db.remove_account(account.id, why)

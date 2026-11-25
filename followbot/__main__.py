@@ -60,6 +60,7 @@ async def run_bot() -> None:
             log.warning("couldn't message the owner: %s", type(exc).__name__)
 
     await worker.remove_blocked_leftovers()  # before spreading, so their locations are free again
+    await worker.finish_stale_jobs()  # jobs whose last follows were dropped just before a restart
     moves = await spread_locations(db, settings)
     if moves:
         # Worker adapters are built after this, so moved accounts start on their new IP.

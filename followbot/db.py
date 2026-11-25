@@ -325,6 +325,14 @@ class Database:
         await self.conn.commit()
         return done
 
+    async def open_jobs_without_work(self) -> list[int]:
+        """Queued jobs with nothing left to do, e.g. their account was removed just before a restart."""
+        cur = await self.conn.execute(
+            "SELECT id FROM jobs j WHERE status = 'queued' "
+            "AND NOT EXISTS (SELECT 1 FROM tasks t WHERE t.job_id = j.id AND t.status = 'pending') ORDER BY id"
+        )
+        return [r["id"] for r in await cur.fetchall()]
+
     async def cancel_pending(self, account_id: int | None = None) -> int:
         where, args = "status = 'pending'", []
         if account_id is not None:
